@@ -1,0 +1,46 @@
+/* Sentinel highlight styles */
+
+.sentinel-highlight {
+  position: relative;
+  cursor: help;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.sentinel-yellow { background-color: rgba(255, 200, 0, 0.35); }
+.sentinel-red    { background-color: rgba(255, 50,  50, 0.30); }
+.sentinel-blue   { background-color: rgba(50,  100, 255, 0.25); }
+
+/* Tooltip */
+.sentinel-tooltip {
+  display: none;
+  position: absolute;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 12px;
+  font-family: sans-serif;
+  font-weight: normal;
+  white-space: nowrap;
+  padding: 5px 10px;
+  border-radius: 5px;
+  z-index: 999999;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.sentinel-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1a1a1a;
+}
+
+.sentinel-highlight:hover .sentinel-tooltip {
+  display: block;
+}

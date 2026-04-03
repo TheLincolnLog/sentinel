@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 260px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f0f0f;
+      color: #f0f0f0;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      margin-bottom: 14px;
+      color: #fff;
+    }
+    h1 span { color: #f0c040; }
+
+    .score-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .score-label { font-size: 12px; color: #aaa; }
+    .bar-wrap {
+      flex: 1;
+      margin: 0 10px;
+      height: 6px;
+      background: #2a2a2a;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar { height: 100%; border-radius: 3px; transition: width 0.4s; }
+    .bar-manipulation { background: #f0c040; }
+    .bar-toxicity     { background: #e05050; }
+    .bar-misinfo      { background: #5080f0; }
+    .score-val { font-size: 12px; min-width: 32px; text-align: right; }
+
+    .status {
+      margin-top: 14px;
+      font-size: 11px;
+      color: #555;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>🛡 <span>Sentinel</span></h1>
+
+  <div class="score-row">
+    <span class="score-label">Manipulation</span>
+    <div class="bar-wrap"><div class="bar bar-manipulation" id="bar-m" style="width:0%"></div></div>
+    <span class="score-val" id="val-m">—</span>
+  </div>
+  <div class="score-row">
+    <span class="score-label">Toxicity</span>
+    <div class="bar-wrap"><div class="bar bar-toxicity" id="bar-t" style="width:0%"></div></div>
+    <span class="score-val" id="val-t">—</span>
+  </div>
+  <div class="score-row">
+    <span class="score-label">Misinfo</span>
+    <div class="bar-wrap"><div class="bar bar-misinfo" id="bar-i" style="width:0%"></div></div>
+    <span class="score-val" id="val-i">—</span>
+  </div>
+
+  <p class="status" id="status">Waiting for analysis…</p>
+
+  <script src="popup.js"></script>
+</body>
+</html>
