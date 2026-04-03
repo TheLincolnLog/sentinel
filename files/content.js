@@ -1,7 +1,7 @@
 // content.js — Sentinel
 // Extracts visible text, sends to backend, highlights flagged phrases
 
-const API_URL = "http://localhost:8000/api/analyze-text";
+const API_URL = "https://projectoverlay.onrender.com/api/analyze-text";
 const MAX_CHARS = 3000;   // cap per request to avoid huge payloads
 const DEBOUNCE_MS = 1500; // wait before re-analyzing after DOM changes
 
