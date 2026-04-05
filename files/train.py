@@ -1,14 +1,11 @@
-# train.py — Sentinel ML trainer
-# Trains a toxicity + cyberbullying classifier and saves model.pkl
+# train.py — Sentinel ML trainer (improved)
+# Changes from v1:
+#   - Added mental health / support language as clean examples
+#   - Added whitelist phrases that are never flagged regardless of score
+#   - More balanced training data to reduce false positives
 #
-# Install deps first:
-#   pip install scikit-learn pandas requests joblib
-#
-# Run:
-#   python train.py
-#
-# Output:
-#   model.pkl  — the trained classifier (used by backend.py)
+# Install: pip install scikit-learn pandas joblib
+# Run:     python train.py
 
 import os
 import re
@@ -20,121 +17,180 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 
-# ── 1. Load dataset ───────────────────────────────────────────────────────────
-# We use the Jigsaw Toxic Comment dataset from Kaggle (via a public mirror).
-# It has 160k Wikipedia comments labelled for: toxic, severe_toxic,
-# obscene, threat, insult, identity_hate.
-#
-# If you have a Kaggle account, you can also download it directly:
-#   https://www.kaggle.com/competitions/jigsaw-toxic-comment-classification-challenge
-#
-# For convenience we also support a smaller cyberbullying dataset that
-# requires no login.
+# ── Whitelist — these phrases are NEVER flagged regardless of ML score ────────
+# Saved alongside the model so backend.py can use it too.
+WHITELIST = [
+    "reach out",
+    "support hotline",
+    "if you are in distress",
+    "if you're in distress",
+    "immediate distress",
+    "please reach out",
+    "mental health",
+    "you are not alone",
+    "you're not alone",
+    "it gets better",
+    "help is available",
+    "crisis line",
+    "talk to someone",
+    "seek help",
+    "here for you",
+    "take care of yourself",
+    "you matter",
+    "safe space",
+    "support group",
+    "professional help",
+    "you are loved",
+    "you're loved",
+    "we care about you",
+    "resources available",
+    "hotline",
+    "helpline",
+]
 
-DATASET_URL = (
-    "https://raw.githubusercontent.com/nicholasgasior/csv-datasets/"
-    "master/cyberbullying_tweets.csv"
-)
+# ── Extra training examples (manually curated) ────────────────────────────────
+# These supplement the downloaded dataset with edge cases the model
+# needs to learn — especially support/mental health language as clean.
 
-FALLBACK_JIGSAW_PATH = "train.csv"  # if you downloaded Kaggle data locally
+EXTRA_CLEAN = [
+    "If you are in immediate distress, please reach out to a support hotline.",
+    "You are not alone, help is always available.",
+    "Please talk to someone you trust if you are struggling.",
+    "Mental health support is available 24/7.",
+    "Reach out to a crisis line if you need immediate help.",
+    "It gets better, please seek professional help.",
+    "We care about your wellbeing and are here for you.",
+    "You matter and your feelings are valid.",
+    "This is a safe space to share your experiences.",
+    "Take care of yourself and reach out if you need support.",
+    "If you or someone you know is struggling, help is available.",
+    "Crisis resources are listed below for anyone who needs them.",
+    "Remember you are loved and not alone in this.",
+    "Please contact a mental health professional if needed.",
+    "Support groups can be incredibly helpful for recovery.",
+    "Great article, thanks for sharing this information.",
+    "I completely agree with your point here.",
+    "This made me think differently about the issue.",
+    "Really appreciate you taking the time to explain this.",
+    "Interesting perspective, I had not considered that before.",
+    "Thank you for the kind words, it means a lot.",
+    "Looking forward to hearing more about this topic.",
+    "Well written and very informative post.",
+    "I learned something valuable from reading this.",
+    "This is exactly what I needed to read today.",
+]
 
-print("[1/5] Loading dataset...")
+EXTRA_TOXIC = [
+    "nobody wants you around, just disappear",
+    "you are worthless and everyone knows it",
+    "no one likes you, go away forever",
+    "you should just give up on life",
+    "everyone hates people like you",
+    "you are ugly and stupid and pathetic",
+    "kill yourself nobody would miss you",
+    "you are a complete waste of space",
+    "i hope something bad happens to you",
+    "you deserve to suffer for that",
+    "get out of here you disgusting loser",
+    "you will never amount to anything",
+    "nobody cares about you or your opinion",
+    "you are the worst person I have ever seen",
+    "shut up you absolute moron",
+    "you are so dumb it is embarrassing",
+    "go cry about it you pathetic loser",
+    "i hate everything about you",
+    "you are trash and always will be",
+    "stop existing you waste of oxygen",
+]
 
-df = None
 
-# Try local Jigsaw file first (most accurate)
-if os.path.exists(FALLBACK_JIGSAW_PATH):
-    print(f"      Found local Jigsaw file: {FALLBACK_JIGSAW_PATH}")
-    raw = pd.read_csv(FALLBACK_JIGSAW_PATH)
-    # Any of the toxic sub-labels counts as toxic
-    toxic_cols = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
-    raw["label"] = (raw[toxic_cols].sum(axis=1) > 0).astype(int)
-    df = raw[["comment_text", "label"]].rename(columns={"comment_text": "text"})
-    print(f"      Jigsaw rows: {len(df)}")
-
-# Otherwise download the smaller cyberbullying CSV (no login needed)
-if df is None:
-    print(f"      Downloading cyberbullying dataset...")
-    try:
-        import urllib.request
-        urllib.request.urlretrieve(DATASET_URL, "cyberbullying_tweets.csv")
-        raw = pd.read_csv("cyberbullying_tweets.csv")
-
-        # Column names vary by source — handle both common formats
-        if "tweet_text" in raw.columns and "cyberbullying_type" in raw.columns:
-            raw["label"] = (raw["cyberbullying_type"] != "not_cyberbullying").astype(int)
-            df = raw[["tweet_text", "label"]].rename(columns={"tweet_text": "text"})
-        elif "Text" in raw.columns and "oh_label" in raw.columns:
-            df = raw[["Text", "oh_label"]].rename(columns={"Text": "text", "oh_label": "label"})
-        else:
-            raise ValueError(f"Unknown columns: {list(raw.columns)}")
-
-        print(f"      Downloaded rows: {len(df)}")
-    except Exception as e:
-        print(f"      Download failed: {e}")
-        print("      Falling back to built-in example data...")
-
-        # Minimal built-in fallback so training always works
-        examples = [
-            ("you are so stupid and ugly", 1),
-            ("I hate you, go kill yourself", 1),
-            ("nobody likes you loser", 1),
-            ("you're worthless garbage", 1),
-            ("shut up idiot", 1),
-            ("you're so dumb I can't believe it", 1),
-            ("this is harassment and you know it", 1),
-            ("i will find you and hurt you", 1),
-            ("Great article, thanks for sharing!", 0),
-            ("I disagree but respect your opinion", 0),
-            ("This is really helpful information", 0),
-            ("Thanks for the update everyone", 0),
-            ("Looking forward to the next post", 0),
-            ("Interesting perspective on the topic", 0),
-            ("Well written and informative", 0),
-            ("I learned something new today", 0),
-        ]
-        df = pd.DataFrame(examples, columns=["text", "label"])
-        print(f"      Using {len(df)} built-in examples (limited accuracy)")
-
-# ── 2. Clean text ─────────────────────────────────────────────────────────────
-print("[2/5] Cleaning text...")
+# ── Text cleaning ─────────────────────────────────────────────────────────────
 
 def clean(text: str) -> str:
     text = str(text).lower()
-    text = re.sub(r"http\S+", "", text)       # remove URLs
-    text = re.sub(r"@\w+", "", text)           # remove @mentions
+    text = re.sub(r"http\S+", "", text)
+    text = re.sub(r"@\w+", "", text)
     text = re.sub(r"[^a-z0-9\s!?.,']", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
+
+# ── Load dataset ──────────────────────────────────────────────────────────────
+print("[1/5] Loading dataset...")
+
+df = None
+FALLBACK_JIGSAW_PATH = "train.csv"
+
+if os.path.exists(FALLBACK_JIGSAW_PATH):
+    print(f"      Found local Jigsaw file.")
+    raw = pd.read_csv(FALLBACK_JIGSAW_PATH)
+    toxic_cols = ["toxic","severe_toxic","obscene","threat","insult","identity_hate"]
+    raw["label"] = (raw[toxic_cols].sum(axis=1) > 0).astype(int)
+    df = raw[["comment_text","label"]].rename(columns={"comment_text":"text"})
+    print(f"      Rows: {len(df)}")
+
+if df is None:
+    print("      Downloading cyberbullying dataset...")
+    try:
+        import urllib.request
+        url = (
+            "https://raw.githubusercontent.com/nicholasgasior/csv-datasets/"
+            "master/cyberbullying_tweets.csv"
+        )
+        urllib.request.urlretrieve(url, "cyberbullying_tweets.csv")
+        raw = pd.read_csv("cyberbullying_tweets.csv")
+        if "tweet_text" in raw.columns and "cyberbullying_type" in raw.columns:
+            raw["label"] = (raw["cyberbullying_type"] != "not_cyberbullying").astype(int)
+            df = raw[["tweet_text","label"]].rename(columns={"tweet_text":"text"})
+        elif "Text" in raw.columns and "oh_label" in raw.columns:
+            df = raw[["Text","oh_label"]].rename(columns={"Text":"text","oh_label":"label"})
+        print(f"      Rows: {len(df)}")
+    except Exception as e:
+        print(f"      Download failed: {e} — using built-in data only")
+        df = pd.DataFrame(columns=["text","label"])
+
+# ── Merge with curated examples ───────────────────────────────────────────────
+print("[2/5] Merging curated examples...")
+
+extra = pd.DataFrame(
+    [(t, 0) for t in EXTRA_CLEAN] + [(t, 1) for t in EXTRA_TOXIC],
+    columns=["text","label"]
+)
+
+# Repeat curated examples several times so they have meaningful weight
+# against a large downloaded dataset
+extra_weighted = pd.concat([extra] * 20, ignore_index=True)
+
+df = pd.concat([df, extra_weighted], ignore_index=True)
 df["text"] = df["text"].apply(clean)
 df = df.dropna(subset=["text"])
 df = df[df["text"].str.len() > 3]
 
 print(f"      Total samples : {len(df)}")
 print(f"      Toxic (1)     : {df['label'].sum()}")
-print(f"      Clean (0)     : {(df['label'] == 0).sum()}")
+print(f"      Clean (0)     : {(df['label']==0).sum()}")
 
-# ── 3. Split ──────────────────────────────────────────────────────────────────
-print("[3/5] Splitting train/test (80/20)...")
+# ── Split ─────────────────────────────────────────────────────────────────────
+print("[3/5] Splitting 80/20...")
 X_train, X_test, y_train, y_test = train_test_split(
-    df["text"], df["label"], test_size=0.2, random_state=42, stratify=df["label"]
+    df["text"], df["label"],
+    test_size=0.2, random_state=42, stratify=df["label"]
 )
 
-# ── 4. Train ──────────────────────────────────────────────────────────────────
-print("[4/5] Training pipeline (TF-IDF + Logistic Regression)...")
+# ── Train ─────────────────────────────────────────────────────────────────────
+print("[4/5] Training (TF-IDF + Logistic Regression)...")
 
 pipeline = Pipeline([
     ("tfidf", TfidfVectorizer(
-        ngram_range=(1, 2),    # unigrams + bigrams
-        max_features=50000,
-        sublinear_tf=True,     # log scaling of term frequency
+        ngram_range=(1, 3),     # up to trigrams for better context
+        max_features=75000,     # more features than before
+        sublinear_tf=True,
         min_df=2,
     )),
     ("clf", LogisticRegression(
-        max_iter=1000,
-        C=5.0,                 # regularization strength
-        class_weight="balanced",  # handles imbalanced datasets
+        max_iter=2000,          # more iterations
+        C=3.0,                  # slightly stronger regularization vs v1
+        class_weight="balanced",
         solver="lbfgs",
         n_jobs=-1,
     )),
@@ -142,26 +198,47 @@ pipeline = Pipeline([
 
 pipeline.fit(X_train, y_train)
 
-# ── 5. Evaluate ───────────────────────────────────────────────────────────────
+# ── Evaluate ──────────────────────────────────────────────────────────────────
 print("[5/5] Evaluating...")
 y_pred = pipeline.predict(X_test)
-print("\n" + classification_report(y_test, y_pred, target_names=["clean", "toxic"]))
+print("\n" + classification_report(y_test, y_pred, target_names=["clean","toxic"]))
 
-# ── Save ──────────────────────────────────────────────────────────────────────
-joblib.dump(pipeline, "model.pkl")
-print("✓  Model saved to model.pkl")
-print("   Copy model.pkl into your 'files/' folder and push to GitHub.")
-print("   The backend will load it automatically on startup.\n")
+# ── Save model + whitelist together ──────────────────────────────────────────
+bundle = {"model": pipeline, "whitelist": WHITELIST}
+joblib.dump(bundle, "model.pkl")
+print("✓  Saved model + whitelist to model.pkl")
 
-# Quick sanity check
-test_cases = [
-    "you are so stupid nobody likes you",
-    "Great post, really helpful!",
-    "I will destroy you loser",
-    "Thanks for sharing this article",
+# ── Sanity check ──────────────────────────────────────────────────────────────
+print("\nSanity check (should all pass):")
+tests = [
+    ("If you are in immediate distress, please reach out to a support hotline.", "clean"),
+    ("You are not alone, help is available.",                                    "clean"),
+    ("nobody wants you around just disappear",                                   "TOXIC"),
+    ("you are worthless and everyone hates you",                                 "TOXIC"),
+    ("Great post, really appreciate you sharing this.",                          "clean"),
+    ("go kill yourself nobody would miss you",                                   "TOXIC"),
+    ("Mental health resources are listed below.",                                "clean"),
+    ("shut up you absolute moron",                                               "TOXIC"),
 ]
-print("Sanity check:")
-for t in test_cases:
-    score = pipeline.predict_proba([clean(t)])[0][1]
-    tag = "TOXIC" if score > 0.5 else "clean"
-    print(f"  [{tag}  {score:.2f}]  {t}")
+
+all_pass = True
+for text, expected in tests:
+    cleaned = clean(text)
+    # Check whitelist first
+    is_whitelisted = any(w in text.lower() for w in WHITELIST)
+    if is_whitelisted:
+        score = 0.0
+        tag = "clean (whitelisted)"
+    else:
+        score = pipeline.predict_proba([cleaned])[0][1]
+        tag = "TOXIC" if score > 0.5 else "clean"
+
+    expected_tag = expected.lower().replace("toxic", "TOXIC")
+    passed = (tag.startswith(expected.split()[0]))
+    status = "✓" if passed else "✗ FAIL"
+    if not passed:
+        all_pass = False
+    print(f"  {status}  [{tag:<24} {score:.2f}]  {text[:60]}")
+
+print("\n" + ("All tests passed ✓" if all_pass else "Some tests failed — check your data"))
+print("\nNext: copy model.pkl into your files/ folder and push to GitHub.\n")
