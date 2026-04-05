@@ -1,6 +1,6 @@
-# backend.py — Sentinel FastAPI backend (ML edition)
-# Run with: uvicorn backend:app --reload
-# Install:  pip install fastapi uvicorn scikit-learn joblib pandas
+# backend.py — Sentinel FastAPI backend (v2, whitelist-aware)
+# Run:     uvicorn backend:app --reload
+# Install: pip install fastapi uvicorn scikit-learn joblib pandas
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,22 +16,28 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-# ── Load ML model (if available) ──────────────────────────────────────────────
+# ── Load model + whitelist ────────────────────────────────────────────────────
 MODEL_PATH = "model.pkl"
-ml_model = None
+ml_model  = None
+whitelist = []
 
 if os.path.exists(MODEL_PATH):
     try:
-        ml_model = joblib.load(MODEL_PATH)
-        print(f"✓  ML model loaded from {MODEL_PATH}")
+        bundle = joblib.load(MODEL_PATH)
+        # Support both old (just model) and new (dict with whitelist) format
+        if isinstance(bundle, dict):
+            ml_model  = bundle["model"]
+            whitelist = bundle.get("whitelist", [])
+        else:
+            ml_model = bundle
+        print(f"✓  ML model loaded  |  whitelist: {len(whitelist)} phrases")
     except Exception as e:
-        print(f"⚠  Could not load model.pkl: {e} — falling back to keywords")
+        print(f"⚠  Could not load model.pkl: {e}")
 else:
-    print("⚠  model.pkl not found — using keyword detection only")
-    print("   Run train.py to generate the model, then copy model.pkl here.")
+    print("⚠  model.pkl not found — keyword mode only")
 
 
-# ── Keyword lists (fallback + manipulation/misinfo, which ML doesn't cover) ───
+# ── Keyword lists ─────────────────────────────────────────────────────────────
 
 MANIPULATION_PHRASES = [
     "shocking", "shocking truth", "they don't want you to know",
@@ -56,63 +62,52 @@ TOXICITY_KEYWORDS = [
 ]
 
 
-# ── Text cleaning (must match train.py) ───────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def clean(text: str) -> str:
     text = text.lower()
     text = re.sub(r"http\S+", "", text)
     text = re.sub(r"@\w+", "", text)
     text = re.sub(r"[^a-z0-9\s!?.,']", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return re.sub(r"\s+", " ", text).strip()
 
-
-# ── Keyword scorer ────────────────────────────────────────────────────────────
+def is_whitelisted(text: str) -> bool:
+    """Return True if the text contains any whitelist phrase."""
+    text_lower = text.lower()
+    return any(phrase in text_lower for phrase in whitelist)
 
 def keyword_score(text: str, phrases: list[str]) -> tuple[float, list[str]]:
     text_lower = text.lower()
     matched = [p for p in phrases if p.lower() in text_lower]
-    caps_count = len(re.findall(r'\b[A-Z]{4,}\b', text))
-    weight = len(matched) + caps_count * 0.5
+    caps = len(re.findall(r'\b[A-Z]{4,}\b', text))
+    weight = len(matched) + caps * 0.5
     score = min(weight / max(len(phrases) * 0.3, 1), 1.0)
     return round(score, 3), matched
-
 
 def build_flags(phrases: list[str], flag_type: str) -> list[dict]:
     return [{"phrase": p, "type": flag_type} for p in phrases]
 
-
-# ── Split text into sentences for per-sentence highlighting ───────────────────
-
 def split_sentences(text: str) -> list[str]:
-    """Split on sentence boundaries, filter short fragments."""
     parts = re.split(r'(?<=[.!?])\s+', text)
     return [p.strip() for p in parts if len(p.strip()) > 8]
 
-
-# ── ML toxicity scoring ───────────────────────────────────────────────────────
-
 def ml_toxicity_score(text: str) -> tuple[float, list[dict]]:
-    """
-    Uses the trained model to score the full text AND each sentence.
-    Returns (overall_score, list of flagged sentence dicts).
-    """
     if ml_model is None:
         return 0.0, []
 
-    # Overall score
     overall = float(ml_model.predict_proba([clean(text)])[0][1])
 
-    # Per-sentence to find which parts are toxic for highlighting
-    sentences = split_sentences(text)
     flags = []
-    for sent in sentences:
+    for sent in split_sentences(text):
+        # Skip whitelisted sentences entirely
+        if is_whitelisted(sent):
+            continue
         score = float(ml_model.predict_proba([clean(sent)])[0][1])
-        if score > 0.6:   # threshold: flag if >60% probability
+        if score > 0.6:
             flags.append({
-                "phrase": sent[:120],  # cap length for DOM matching
-                "type": "toxicity",
-                "score": round(score, 3),
+                "phrase": sent[:120],
+                "type":   "toxicity",
+                "score":  round(score, 3),
             })
 
     return round(overall, 3), flags
@@ -131,13 +126,12 @@ class AnalyzeResponse(BaseModel):
     flags:        list[dict]
 
 
-# ── Main endpoint ─────────────────────────────────────────────────────────────
+# ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @app.post("/api/analyze-text", response_model=AnalyzeResponse)
 def analyze_text(req: AnalyzeRequest):
     text = req.text[:5000]
 
-    # Manipulation + misinfo — keyword based (works without ML model)
     manip_score, manip_matches = keyword_score(text, MANIPULATION_PHRASES)
     mis_score,   mis_matches   = keyword_score(text, MISINFO_PHRASES)
 
@@ -146,7 +140,6 @@ def analyze_text(req: AnalyzeRequest):
         build_flags(mis_matches,   "misinfo")
     )
 
-    # Toxicity — ML model if available, keywords as fallback
     if ml_model is not None:
         tox_score, tox_flags = ml_toxicity_score(text)
         flags += tox_flags
@@ -165,11 +158,12 @@ def analyze_text(req: AnalyzeRequest):
     )
 
 
-# ── Health check ──────────────────────────────────────────────────────────────
+# ── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 def health():
     return {
-        "status": "Sentinel backend running",
-        "ml_model": "loaded" if ml_model else "not found — keyword mode",
+        "status":     "Sentinel backend running",
+        "ml_model":   "loaded" if ml_model else "not found",
+        "whitelist":  f"{len(whitelist)} phrases protected",
     }
