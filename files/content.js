@@ -1,7 +1,7 @@
 // content.js — Sentinel v3
 // Injects floating bubble + sidebar panel into every page
 
-const API_URL = "https://sentinel-xxxx.onrender.com/api/analyze-text";
+const API_URL = "https://projectoverlay.onrender.com/api/analyze-text";
 const MAX_CHARS = 5000;
 const DEBOUNCE_MS = 1500;
 
