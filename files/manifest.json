@@ -1,20 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Sentinel",
-  "version": "1.0",
+  "version": "3.0",
   "description": "Real-time manipulation, toxicity, and misinformation detector",
-  "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["http://localhost:8000/*"],
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://*/*", "http://*/*"],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "css": ["styles.css"],
+      "css": ["sidebar.css"],
       "run_at": "document_idle"
     }
-  ],
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "Sentinel"
-  }
+  ]
 }
