@@ -197,7 +197,7 @@ function extractReddit() {
   )?.trim();
 
   const body = (
-    document.querySelector('[data-click-id="text"] .md")?.textContent ||
+    document.querySelector('[data-click-id="text"] .md')?.textContent ||
     document.querySelector("[slot='text-body']")?.textContent ||
     ""
   )?.trim().slice(0, 800);
