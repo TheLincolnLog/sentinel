@@ -1,11 +1,12 @@
-// content.js — Sentinel v5 + Dashboard Bridge
-// Posts all scan results to the dashboard via BroadcastChannel
-// Adds deep social media content extraction for YouTube/IG/TikTok/Discord/Reddit
+// content.js — Sentinel v6
+// Improvements: URL passed to backend, scan cache, overall_severity,
+//               smarter debounce, flag severity coloring, better text extraction
 
 const API_URL = "https://projectoverlay.onrender.com/api/analyze-text";
-const DASHBOARD_URL = "http://localhost:3000"; // update if deployed
+const DASHBOARD_URL = "http://localhost:3000";
 const MAX_CHARS = 5000;
-const DEBOUNCE_MS = 2000;
+const DEBOUNCE_MS = 2500;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let activeMode      = null;
@@ -16,6 +17,9 @@ let isScanning      = false;
 let observerPaused  = false;
 let imageDetectOn   = false;
 let textAiOn        = false;
+
+// Scan result cache: url+mode → { data, timestamp }
+const scanCache = new Map();
 
 // ── Dashboard bridge ──────────────────────────────────────────────────────────
 let dashChannel = null;
@@ -520,46 +524,51 @@ async function runScan(mode) {
     return;
   }
 
+  // Check cache first
+  const cacheKey = `${location.href}:${mode}`;
+  const cached = scanCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    const data = cached.data;
+    lastFlags = data.flags || [];
+    applyResultsToUI(mode, data, lastFlags, extracted);
+    setStatus(mode, `${lastFlags.length} flag(s) — cached result`);
+    isScanning = false;
+    return;
+  }
+
   try {
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, mode }),
+      body: JSON.stringify({ text, mode, url: location.href }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     lastFlags = data.flags || [];
 
+    // Cache the result
+    scanCache.set(cacheKey, { data, timestamp: Date.now() });
+
     observerPaused = true;
     clearHighlights();
-
-    if (mode === "toxicity") {
-      updateToxicityUI(data);
-      applyHighlights(lastFlags.filter(f => f.type === "toxicity"), "s-hl-red");
-    } else if (mode === "misinfo") {
-      updateMisinfoUI(data);
-      applyHighlights(lastFlags.filter(f => f.type === "misinfo" || f.type === "manipulation"), "s-hl-amber");
-      applyHighlights(lastFlags.filter(f => f.type === "ai"), "s-hl-purple");
-    } else if (mode === "scam") {
-      updateScamUI(data);
-      applyHighlights(lastFlags.filter(f => f.type === "scam" || f.type === "phishing"), "s-hl-orange");
-    }
+    applyResultsToUI(mode, data, lastFlags, extracted);
     observerPaused = false;
 
-    // ── Post to dashboard ─────────────────────────────────────────────────
+    // Post to dashboard
     postToDashboard({
       text: text.slice(0, 300),
       flags: lastFlags,
-      toxicity:     data.toxicity     || 0,
-      manipulation: data.manipulation || 0,
-      misinfo:      data.misinfo      || 0,
-      scam_score:   data.scam_score   || 0,
-      ai_score:     data.ai_score     || 0,
-      platform:     extracted.platform || "",
-      pageTitle:    document.title,
-      pageUrl:      location.href,
-      contentType:  extracted.contentType || "unknown",
-      contentTitle: extracted.contentTitle || "",
+      toxicity:         data.toxicity     || 0,
+      manipulation:     data.manipulation || 0,
+      misinfo:          data.misinfo      || 0,
+      scam_score:       data.scam_score   || 0,
+      ai_score:         data.ai_score     || 0,
+      overall_severity: data.overall_severity || "clean",
+      platform:         extracted.platform || "",
+      pageTitle:        document.title,
+      pageUrl:          location.href,
+      contentType:      extracted.contentType || "unknown",
+      contentTitle:     extracted.contentTitle || "",
     });
 
     const count = lastFlags.length;
@@ -569,6 +578,20 @@ async function runScan(mode) {
     console.warn("[Sentinel]", e);
   }
   isScanning = false;
+}
+
+function applyResultsToUI(mode, data, flags, extracted) {
+  if (mode === "toxicity") {
+    updateToxicityUI(data);
+    applyHighlights(flags.filter(f => f.type === "toxicity"), "s-hl-red");
+  } else if (mode === "misinfo") {
+    updateMisinfoUI(data);
+    applyHighlights(flags.filter(f => f.type === "misinfo" || f.type === "manipulation"), "s-hl-amber");
+    applyHighlights(flags.filter(f => f.type === "ai"), "s-hl-purple");
+  } else if (mode === "scam") {
+    updateScamUI(data);
+    applyHighlights(flags.filter(f => f.type === "scam" || f.type === "phishing"), "s-hl-orange");
+  }
 }
 
 // ── UI updaters (same as v5 content.js) ──────────────────────────────────────
@@ -609,12 +632,18 @@ function setBar(barId, pctId, pct) {
 function generateWriteup(elId, flags, mode, score) {
   const el = document.getElementById(elId);
   if (!el) return;
-  if (!flags.length) { el.textContent = score < 20 ? "No significant patterns detected." : "Low-level signals detected."; return; }
-  const phrases = flags.slice(0,3).map(f => `"${f.phrase.slice(0,40)}"`).join(", ");
+  if (!flags.length) {
+    el.textContent = score < 20 ? "No significant patterns detected." : "Low-level signals detected — content appears mostly safe.";
+    return;
+  }
+  // Prioritize high-severity flags in the writeup
+  const highFlags = flags.filter(f => f.severity === "high");
+  const topFlags  = (highFlags.length ? highFlags : flags).slice(0, 3);
+  const phrases   = topFlags.map(f => `"${f.phrase.slice(0, 40)}"`).join(", ");
   const writeups = {
-    toxicity: `${flags.length} harmful language pattern(s) detected: ${phrases}. ${score > 65 ? "HIGH risk — targeted harassment patterns present." : "Moderate signals — review flagged content."}`,
-    misinfo:  `${flags.length} misinformation signal(s): ${phrases}. ${score > 65 ? "HIGH likelihood of misleading content." : "Some persuasion tactics detected."}`,
-    scam:     `${flags.length} threat indicator(s): ${phrases}. ${score > 65 ? "HIGH threat — do not submit personal information." : "Some scam patterns present — proceed with caution."}`,
+    toxicity: `${flags.length} harmful pattern(s) found: ${phrases}. ${score > 65 ? "HIGH RISK — targeted harassment or hate speech patterns present." : "Moderate signals — review flagged content before engaging."}`,
+    misinfo:  `${flags.length} misinformation signal(s): ${phrases}. ${score > 65 ? "HIGH likelihood of misleading or manipulative content." : "Some persuasion tactics or unverified claims detected."}`,
+    scam:     `${flags.length} threat indicator(s): ${phrases}. ${score > 65 ? "HIGH THREAT — do not submit personal information on this page." : "Scam patterns present — proceed with caution."}`,
   };
   el.textContent = writeups[mode] || "Analysis complete.";
 }
@@ -625,12 +654,20 @@ function renderFlags(containerId, flags, mode) {
   if (!flags.length) { el.innerHTML = `<div class="s-no-flags">No flags detected</div>`; return; }
   const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   const colorMap = { toxicity:"#E8253A", manipulation:"#F5A623", misinfo:"#4A8FE8", ai:"#9B5CF6", scam:"#FF6B35", phishing:"#FF6B35" };
-  el.innerHTML = flags.map(f => `
+  // Sort by score descending so highest confidence flags appear first
+  const sorted = [...flags].sort((a, b) => (b.score || 0) - (a.score || 0));
+  el.innerHTML = sorted.map(f => {
+    const severityLabel = f.severity ? `<span class="s-fr-severity s-sev-${f.severity}">${f.severity.toUpperCase()}</span>` : "";
+    return `
     <div class="s-flag-row" style="border-left-color:${colorMap[f.type]||"#555"}">
-      <div class="s-fr-type">${esc(f.type.toUpperCase())}</div>
+      <div class="s-fr-header">
+        <div class="s-fr-type">${esc(f.type.toUpperCase())}</div>
+        ${severityLabel}
+      </div>
       <div class="s-fr-phrase">"${esc(f.phrase.slice(0,70))}${f.phrase.length>70?"…":""}"</div>
       ${f.score ? `<div class="s-fr-conf">Confidence: ${Math.round(f.score*100)}%</div>` : ""}
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 function renderLinks(containerId) {
