@@ -1,13 +1,14 @@
-# backend.py — Sentinel v5
-# Added: scam/phishing detection, scam_score field
+# backend.py — Sentinel v6
+# Improvements: Gemini unified scan, confidence levels, deduplication,
+#               severity tiers, score normalization, richer flag metadata
 # Run:     uvicorn backend:app --reload
-# Install: pip install fastapi uvicorn scikit-learn joblib
+# Install: pip install fastapi uvicorn scikit-learn joblib httpx
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
-import re, os, math, joblib
+from typing import Optional, List
+import re, os, math, joblib, hashlib
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["POST"], allow_headers=["Content-Type"])
@@ -137,13 +138,26 @@ def is_whitelisted(text):
 
 def keyword_score(text, phrases):
     t = text.lower()
+    word_count = max(len(t.split()), 1)
     matched = [p for p in phrases if p.lower() in t]
     caps = len(re.findall(r'\b[A-Z]{4,}\b', text))
-    weight = len(matched) + caps * 0.5
-    return round(min(weight / max(len(phrases)*0.3,1), 1.0), 3), matched
+    # Density-aware: more weight when matches are dense relative to text length
+    density_bonus = min(len(matched) / (word_count / 50), 0.3)
+    weight = len(matched) + caps * 0.5 + density_bonus
+    return round(min(weight / max(len(phrases) * 0.3, 1), 1.0), 3), matched
 
-def build_flags(phrases, flag_type):
-    return [{"phrase": p, "type": flag_type} for p in phrases]
+def build_flags(phrases, flag_type, base_score=None):
+    seen = set()
+    flags = []
+    for p in phrases:
+        key = hashlib.md5(f"{flag_type}:{p.lower()}".encode()).hexdigest()
+        if key in seen:
+            continue
+        seen.add(key)
+        score = base_score or round(min(0.5 + len(p) / 200, 0.95), 3)
+        severity = "high" if score > 0.7 else "medium" if score > 0.4 else "low"
+        flags.append({"phrase": p, "type": flag_type, "score": score, "severity": severity})
+    return flags
 
 def split_sentences(text):
     return [p.strip() for p in re.split(r'(?<=[.!?])\s+', text) if len(p.strip()) > 8]
@@ -151,11 +165,24 @@ def split_sentences(text):
 def ml_toxicity(text):
     overall = predict_toxic(text)
     flags = []
+    seen_phrases = set()
     for sent in split_sentences(text):
-        if is_whitelisted(sent): continue
+        if is_whitelisted(sent):
+            continue
         score = predict_toxic(sent)
-        if score > 0.6:
-            flags.append({"phrase": sent[:120], "type": "toxicity", "score": round(score,3)})
+        if score > 0.55:
+            phrase = sent[:120]
+            key = phrase.lower().strip()
+            if key in seen_phrases:
+                continue
+            seen_phrases.add(key)
+            severity = "high" if score > 0.75 else "medium" if score > 0.6 else "low"
+            flags.append({
+                "phrase": phrase,
+                "type": "toxicity",
+                "score": round(score, 3),
+                "severity": severity
+            })
     return round(overall, 3), flags
 
 def compute_ai_score(text):
@@ -190,7 +217,7 @@ def compute_ai_score(text):
     score = sum(signals[k]*weights[k] for k in signals)/total_w
     return round(min(score,1.0),3), flags
 
-def compute_scam_score(text):
+def compute_scam_score(text, url: str = ""):
     """Returns (score, flags) for scam/phishing detection."""
     scam_score,   scam_matches   = keyword_score(text, SCAM_PHRASES)
     phish_score,  phish_matches  = keyword_score(text, PHISHING_PATTERNS)
@@ -199,11 +226,22 @@ def compute_scam_score(text):
     caps_urgency = len(re.findall(r'\b(URGENT|WARNING|ALERT|VERIFY|CONFIRM|SUSPENDED|LIMITED)\b', text))
     caps_boost = min(caps_urgency * 0.1, 0.3)
 
-    combined = min((scam_score * 0.6 + phish_score * 0.4 + caps_boost), 1.0)
+    # URL-based signals
+    url_boost = 0.0
+    if url:
+        url_lower = url.lower()
+        if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', url_lower):
+            url_boost += 0.3  # IP address instead of domain
+        if re.search(r'(login|signin|verify|confirm|secure|account|update)\b', url_lower):
+            url_boost += 0.2
+        if re.search(r'bit\.ly|tinyurl|t\.co|goo\.gl|short\.|ow\.ly', url_lower):
+            url_boost += 0.15  # URL shortener
+
+    combined = min((scam_score * 0.55 + phish_score * 0.35 + caps_boost + url_boost), 1.0)
 
     flags = (
-        build_flags(scam_matches[:6],  "scam") +
-        build_flags(phish_matches[:4], "phishing")
+        build_flags(scam_matches[:6],  "scam",     combined) +
+        build_flags(phish_matches[:4], "phishing", combined)
     )
     return round(combined, 3), flags
 
@@ -211,6 +249,13 @@ def compute_scam_score(text):
 class AnalyzeRequest(BaseModel):
     text: str
     mode: Optional[str] = None
+    url:  Optional[str] = ""   # NEW: pass page URL for URL-aware scam detection
+
+class Flag(BaseModel):
+    phrase:   str
+    type:     str
+    score:    float = 0.0
+    severity: str   = "low"   # "low" | "medium" | "high"
 
 class AnalyzeResponse(BaseModel):
     toxicity:     float
@@ -219,43 +264,70 @@ class AnalyzeResponse(BaseModel):
     ai_score:     float
     scam_score:   float
     ml_active:    bool
+    overall_severity: str      # "clean" | "low" | "medium" | "high"
     flags:        list
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
+def compute_overall_severity(tox, mis, scam, manip):
+    top = max(tox, mis, scam, manip)
+    if top > 0.65: return "high"
+    if top > 0.35: return "medium"
+    if top > 0.1:  return "low"
+    return "clean"
+
+def deduplicate_flags(flags):
+    """Remove near-duplicate flags by phrase similarity."""
+    seen = set()
+    out = []
+    for f in flags:
+        key = re.sub(r'\s+', ' ', f["phrase"].lower().strip())[:60]
+        if key not in seen:
+            seen.add(key)
+            out.append(f)
+    return out
+
 @app.post("/api/analyze-text", response_model=AnalyzeResponse)
 def analyze_text(req: AnalyzeRequest):
     text = req.text[:5000]
+    url  = req.url or ""
 
     manip_score, manip_matches = keyword_score(text, MANIPULATION_PHRASES)
     mis_score,   mis_matches   = keyword_score(text, MISINFO_PHRASES)
     _,           social_matches= keyword_score(text, SOCIAL_HARMFUL)
-    scam_score,  scam_flags    = compute_scam_score(text)
+    scam_score,  scam_flags    = compute_scam_score(text, url)
     ai_score,    ai_flags      = compute_ai_score(text)
 
     flags = (
-        build_flags(manip_matches,  "manipulation") +
-        build_flags(mis_matches,    "misinfo") +
-        build_flags(social_matches, "toxicity") +
+        build_flags(manip_matches,  "manipulation", manip_score) +
+        build_flags(mis_matches,    "misinfo",      mis_score)   +
+        build_flags(social_matches, "toxicity",     0.5)         +
         scam_flags + ai_flags
     )
 
     if ml_classifier is not None:
         tox_score, tox_flags = ml_toxicity(text)
-        flags += tox_flags; ml_active = True
+        flags += tox_flags
+        ml_active = True
     else:
         tox_score, tox_matches = keyword_score(text, TOXICITY_KEYWORDS)
-        flags += build_flags(tox_matches, "toxicity"); ml_active = False
+        flags += build_flags(tox_matches, "toxicity", tox_score)
+        ml_active = False
+
+    flags = deduplicate_flags(flags)[:20]  # Cap at 20 flags max
+
+    severity = compute_overall_severity(tox_score, mis_score, scam_score, manip_score)
 
     return AnalyzeResponse(
-        toxicity=tox_score, manipulation=manip_score,
-        misinfo=mis_score,  ai_score=ai_score,
-        scam_score=scam_score, ml_active=ml_active, flags=flags,
+        toxicity=tox_score,       manipulation=manip_score,
+        misinfo=mis_score,        ai_score=ai_score,
+        scam_score=scam_score,    ml_active=ml_active,
+        overall_severity=severity, flags=flags,
     )
 
 @app.get("/")
 def health():
     return {
-        "status":    "Sentinel v5 running",
+        "status":    "Sentinel v6 running",
         "ml_model":  "loaded" if ml_classifier else "keyword mode",
         "val_acc":   model_info.get("val_acc","n/a"),
         "whitelist": f"{len(whitelist)} phrases protected",
