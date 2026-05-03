@@ -1,10 +1,11 @@
 /**
- * Sentinel Dashboard v5
+ * Sentinel Dashboard v6
  * - Receives live scan data from the Chrome extension via BroadcastChannel
  * - Sends browser notifications on high-risk detections
  * - Stores per-feature history with timestamps
  * - Social media content feed: YouTube/IG/TikTok/Discord/Reddit alerts
  * - Manual text analysis via Gemini + heuristic backend
+ * - Flag severity badges, cache-aware scan display, overall_severity support
  */
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
@@ -32,7 +33,7 @@ type Mode = "toxicity" | "misinfo" | "scam";
 type Platform = "youtube" | "instagram" | "tiktok" | "discord" | "reddit" | "twitter" | "unknown";
 type Severity = "high" | "medium" | "low" | "clean";
 
-interface Flag { phrase: string; type: string; score?: number; }
+interface Flag { phrase: string; type: string; score?: number; severity?: "low" | "medium" | "high"; }
 
 interface ScanResult {
   id: string;
@@ -67,6 +68,7 @@ interface ExtensionMessage {
     misinfo: number;
     scam_score: number;
     ai_score: number;
+    overall_severity?: string;
     platform?: string;
     pageTitle?: string;
     pageUrl?: string;
@@ -83,7 +85,11 @@ interface FeatureStats {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-function getSeverity(tox: number, mis: number, scam: number): Severity {
+function getSeverity(tox: number, mis: number, scam: number, backendSeverity?: string): Severity {
+  // Trust the backend's computed severity if provided
+  if (backendSeverity && ["high","medium","low","clean"].includes(backendSeverity)) {
+    return backendSeverity as Severity;
+  }
   const max = Math.max(tox, mis, scam);
   if (max > 0.65) return "high";
   if (max > 0.35) return "medium";
@@ -173,7 +179,7 @@ export default function AnalysisDashboard() {
       setLastHeartbeat(Date.now());
 
       const platform = detectPlatform(p.pageUrl) || (p.platform as Platform) || "unknown";
-      const severity  = getSeverity(p.toxicity, p.misinfo, p.scam_score);
+      const severity  = getSeverity(p.toxicity, p.misinfo, p.scam_score, p.overall_severity);
 
       // Get Gemini writeup for high/medium detections
       let analysis = "Heuristic scan complete.";
@@ -841,9 +847,16 @@ function ScanResultCard({ result }: { result: ScanResult }) {
               <p className="text-[11px] text-foreground/80 leading-relaxed">{result.analysis}</p>
               {result.flags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  {result.flags.slice(0, 5).map((f, i) => (
-                    <span key={i} className="text-[9px] px-2 py-0.5 bg-muted rounded-full font-medium">"{f.phrase.slice(0, 30)}"</span>
-                  ))}
+                  {result.flags.slice(0, 6).map((f, i) => {
+                    const sevColor = f.severity === "high" ? "text-red-600 bg-red-50" : f.severity === "medium" ? "text-amber-600 bg-amber-50" : "text-muted-foreground bg-muted/40";
+                    return (
+                      <span key={i} className={`text-[9px] px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${sevColor}`}>
+                        {f.severity && <span className="capitalize">{f.severity}</span>}
+                        <span className="opacity-70">· {f.type}</span>
+                        <span className="italic">"{f.phrase.slice(0, 25)}"</span>
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </div>
