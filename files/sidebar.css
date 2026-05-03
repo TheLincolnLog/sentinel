@@ -267,11 +267,23 @@
   background: #0c0c0c; border-radius: 6px;
   padding: 8px 10px; border-left: 2px solid #333;
 }
+.s-fr-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 3px;
+}
 .s-fr-type {
   font-family: 'JetBrains Mono', monospace;
   font-size: 7px; font-weight: 700; letter-spacing: 0.15em;
-  color: #444; margin-bottom: 3px;
+  color: #444;
 }
+.s-fr-severity {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 6px; font-weight: 700; letter-spacing: 0.1em;
+  padding: 1px 5px; border-radius: 3px;
+}
+.s-sev-high   { background: rgba(232,37,58,0.15);  color: #E8253A; }
+.s-sev-medium { background: rgba(245,166,35,0.15); color: #F5A623; }
+.s-sev-low    { background: rgba(93,216,121,0.10); color: #5DD879; }
 .s-fr-phrase {
   font-size: 11px; color: #888; font-style: italic; margin-bottom: 2px;
 }
