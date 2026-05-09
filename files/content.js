@@ -1,12 +1,13 @@
-// content.js — Sentinel v6
-// Improvements: URL passed to backend, scan cache, overall_severity,
-//               smarter debounce, flag severity coloring, better text extraction
+// content.js — Sentinel v7
+// New: Social media creator scanner with inline post banners
+// Analyzes creator bio, caption, hashtags, comments for harmful habit promotion
 
-const API_URL = "https://projectoverlay.onrender.com/api/analyze-text";
-const DASHBOARD_URL = "http://localhost:3000";
-const MAX_CHARS = 5000;
-const DEBOUNCE_MS = 2500;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const API_URL         = "https://projectoverlay.onrender.com/api/analyze-text";
+const CREATOR_API_URL = "https://projectoverlay.onrender.com/api/analyze-creator";
+const DASHBOARD_URL   = "http://localhost:3000";
+const MAX_CHARS       = 5000;
+const DEBOUNCE_MS     = 2500;
+const CACHE_TTL_MS    = 5 * 60 * 1000; // 5 minutes
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let activeMode      = null;
@@ -20,6 +21,10 @@ let textAiOn        = false;
 
 // Scan result cache: url+mode → { data, timestamp }
 const scanCache = new Map();
+
+// Creator scan state
+let creatorScanDone   = false;   // only scan once per page load
+let creatorBannerEl   = null;    // reference to injected banner
 
 // ── Dashboard bridge ──────────────────────────────────────────────────────────
 let dashChannel = null;
@@ -78,13 +83,12 @@ function getExtractor() {
 }
 
 function extractYouTube() {
-  // Shorts: title in overlay, description in panel
   const isShort = location.pathname.startsWith("/shorts");
+
   const title = (
     document.querySelector("#above-the-fold #title h1")?.textContent ||
     document.querySelector("yt-formatted-string.ytd-watch-metadata")?.textContent ||
     document.querySelector(".reel-player-overlay-renderer h2")?.textContent ||
-    document.querySelector("ytd-shorts-video-renderer #channel-name")?.textContent ||
     document.title.replace(" - YouTube", "")
   )?.trim();
 
@@ -100,28 +104,74 @@ function extractYouTube() {
     ""
   )?.trim();
 
+  // Bio / about snippet shown under video
+  const channelBio = (
+    document.querySelector("#description-container")?.textContent ||
+    document.querySelector("ytd-channel-about-metadata-renderer #description-container")?.textContent ||
+    ""
+  )?.trim().slice(0, 300);
+
+  // Subscriber count as a theme signal
+  const subCount = (
+    document.querySelector("#owner-sub-count")?.textContent ||
+    document.querySelector("yt-formatted-string#subscribers")?.textContent ||
+    ""
+  )?.trim();
+
+  // Hashtags in description
+  const hashtags = [...(description + " " + title).matchAll(/#\w+/g)]
+    .map(m => m[0]).slice(0, 15).join(" ");
+
   const comments = [...document.querySelectorAll("#content-text")]
     .slice(0, 10)
     .map(el => el.textContent?.trim())
     .filter(Boolean)
     .join("\n");
 
+  // Infer channel theme from title + description + hashtags
+  const themeText = [title, description, hashtags].join(" ").toLowerCase();
+  const theme = inferTheme(themeText);
+
   return {
-    contentType: isShort ? "short" : "post",
+    contentType:  isShort ? "short" : "post",
     contentTitle: title,
     text: [title, description, channelName, comments].filter(Boolean).join("\n"),
     platform: "youtube",
+    // Creator profile fields
+    creator_name: channelName,
+    bio:          channelBio || description.slice(0, 200),
+    caption:      title,
+    hashtags,
+    theme,
+    comments,
   };
 }
 
 function extractInstagram() {
   const isReel = location.pathname.startsWith("/reel");
+
   const caption = (
     document.querySelector("h1")?.textContent ||
     document.querySelector("[class*='Caption']")?.textContent ||
     document.querySelector("article span")?.textContent ||
     ""
   )?.trim().slice(0, 500);
+
+  const creatorHandle = (
+    document.querySelector("header a[href*='/']")?.textContent ||
+    document.querySelector("[class*='Username']")?.textContent ||
+    ""
+  )?.trim();
+
+  // Bio visible on post page (shown in header area)
+  const bio = (
+    document.querySelector("[class*='Biography']")?.textContent ||
+    document.querySelector("header section > div > span")?.textContent ||
+    ""
+  )?.trim().slice(0, 300);
+
+  const hashtags = [...caption.matchAll(/#\w+/g)]
+    .map(m => m[0]).slice(0, 15).join(" ");
 
   const altTexts = [...document.querySelectorAll("img[alt]")]
     .filter(img => !img.closest("#sentinel-root"))
@@ -136,11 +186,20 @@ function extractInstagram() {
     .filter(Boolean)
     .join("\n");
 
+  const themeText = [caption, hashtags, bio].join(" ").toLowerCase();
+  const theme = inferTheme(themeText);
+
   return {
-    contentType: isReel ? "reel" : "post",
+    contentType:  isReel ? "reel" : "post",
     contentTitle: caption.slice(0, 100),
     text: [caption, altTexts, comments].filter(Boolean).join("\n"),
     platform: "instagram",
+    creator_name: creatorHandle,
+    bio,
+    caption,
+    hashtags,
+    theme,
+    comments,
   };
 }
 
@@ -158,17 +217,36 @@ function extractTikTok() {
     ""
   )?.trim();
 
+  // Bio from author panel
+  const bio = (
+    document.querySelector('[data-e2e="user-bio"]')?.textContent ||
+    document.querySelector('[class*="user-bio"]')?.textContent ||
+    ""
+  )?.trim().slice(0, 300);
+
+  const hashtags = [...desc.matchAll(/#\w+/g)]
+    .map(m => m[0]).slice(0, 15).join(" ");
+
   const comments = [...document.querySelectorAll('[data-e2e="comment-level-1"] p, [class*="comment-text"]')]
     .slice(0, 10)
     .map(el => el.textContent?.trim())
     .filter(Boolean)
     .join("\n");
 
+  const themeText = [desc, hashtags, bio].join(" ").toLowerCase();
+  const theme = inferTheme(themeText);
+
   return {
-    contentType: "short",
+    contentType:  "short",
     contentTitle: desc?.slice(0, 100),
     text: [desc, author ? `By @${author}` : "", comments].filter(Boolean).join("\n"),
     platform: "tiktok",
+    creator_name: author,
+    bio,
+    caption: desc,
+    hashtags,
+    theme,
+    comments,
   };
 }
 
@@ -248,7 +326,260 @@ function extractThreads() {
   };
 }
 
-// ── Platform selectors for highlight targeting ────────────────────────────────
+// ── Theme inference (fast local pass) ────────────────────────────────────────
+function inferTheme(text) {
+  const t = text.toLowerCase();
+  if (/\b(diet|weight loss|calories|keto|fasting|fitness|gym|workout|shred|bulk|lean|muscle|protein)\b/.test(t)) return "fitness / diet";
+  if (/\b(crypto|bitcoin|nft|invest|trading|forex|stocks|passive income|financial freedom|make money)\b/.test(t)) return "finance / crypto";
+  if (/\b(gambling|casino|betting|slots|poker|odds|wager)\b/.test(t)) return "gambling";
+  if (/\b(alcohol|drinking|party|nightlife|drunk|shots|hangover)\b/.test(t)) return "nightlife / alcohol";
+  if (/\b(mental health|anxiety|depression|therapy|self-love|healing|trauma|mindset)\b/.test(t)) return "mental health / wellness";
+  if (/\b(beauty|makeup|skincare|fashion|style|outfit|aesthetic)\b/.test(t)) return "beauty / fashion";
+  if (/\b(gaming|twitch|stream|esports|minecraft|fortnite|valorant)\b/.test(t)) return "gaming";
+  if (/\b(politics|news|current events|government|election|liberal|conservative)\b/.test(t)) return "politics / news";
+  if (/\b(comedy|funny|memes|humor|satire|prank|skit)\b/.test(t)) return "comedy / entertainment";
+  if (/\b(food|recipe|cooking|restaurant|chef|baking|meal prep)\b/.test(t)) return "food";
+  if (/\b(travel|vlog|adventure|explore|destination|trip)\b/.test(t)) return "travel / lifestyle";
+  return "general / unknown";
+}
+
+// ── Creator health scan ───────────────────────────────────────────────────────
+const creatorScanCache = new Map(); // creatorName+platform → { data, timestamp }
+
+async function runCreatorScan(extracted) {
+  // Only run on social media platforms with enough data
+  const socialPlatforms = ["youtube", "instagram", "tiktok", "twitter", "reddit", "tiktok", "threads"];
+  if (!socialPlatforms.includes(extracted.platform)) return;
+  if (!extracted.caption && !extracted.bio && !extracted.creator_name) return;
+  if (creatorScanDone) return;
+  creatorScanDone = true;
+
+  // Cache by creator+platform so navigating between posts by same creator reuses result
+  const cacheKey = `${extracted.creator_name}:${extracted.platform}`;
+  const cached = creatorScanCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    injectCreatorBanner(cached.data, extracted);
+    return;
+  }
+
+  try {
+    const res = await fetch(CREATOR_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform:     extracted.platform,
+        creator_name: extracted.creator_name || "",
+        bio:          extracted.bio          || "",
+        caption:      extracted.caption      || "",
+        hashtags:     extracted.hashtags     || "",
+        theme:        extracted.theme        || "",
+        comments:     extracted.comments     || "",
+        url:          location.href,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    creatorScanCache.set(cacheKey, { data, timestamp: Date.now() });
+    injectCreatorBanner(data, extracted);
+
+    // Also post to dashboard social alerts tab
+    postToDashboard({
+      type:           "CREATOR_SCAN",
+      platform:       extracted.platform,
+      pageUrl:        location.href,
+      pageTitle:      document.title,
+      creator_name:   extracted.creator_name,
+      creator_theme:  data.creator_theme,
+      overall_health: data.overall_health,
+      health_score:   data.health_score,
+      summary:        data.summary,
+      recommendation: data.recommendation,
+      flags:          data.flags,
+      habits_promoted: data.habits_promoted,
+    });
+  } catch(e) {
+    console.warn("[Sentinel] Creator scan failed:", e);
+  }
+}
+
+// ── Inline banner injector ────────────────────────────────────────────────────
+function injectCreatorBanner(data, extracted) {
+  // Remove any existing banner
+  document.getElementById("sentinel-creator-banner")?.remove();
+  creatorBannerEl = null;
+
+  const health    = data.overall_health || "caution";
+  const score     = data.health_score   ?? 50;
+  const summary   = data.summary        || "";
+  const rec       = data.recommendation || "";
+  const theme     = data.creator_theme  || extracted.theme || "";
+  const habits    = (data.habits_promoted || []).slice(0, 4);
+  const flags     = data.flags          || {};
+  const creator   = extracted.creator_name || "This creator";
+
+  const colorMap = {
+    healthy: { bar: "#22c55e", bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d", icon: "✅", label: "HEALTHY CONTENT" },
+    caution: { bar: "#f59e0b", bg: "#fffbeb", border: "#fde68a", text: "#b45309", icon: "⚠️", label: "USE CAUTION" },
+    harmful: { bar: "#ef4444", bg: "#fef2f2", border: "#fecaca", text: "#b91c1c", icon: "🚨", label: "POTENTIALLY HARMFUL" },
+  };
+  const c = colorMap[health] || colorMap.caution;
+
+  // Active flags with detail
+  const FLAG_LABELS = {
+    dangerous_diet_fitness: "🥗 Diet / Fitness Advice",
+    financial_scam:         "💸 Financial / Scam Risk",
+    addiction_promotion:    "🎰 Addiction-Promoting",
+    mental_health_harm:     "🧠 Mental Health Harm",
+  };
+  const activeFlags = Object.entries(flags)
+    .filter(([, v]) => v.detected && v.severity !== "none")
+    .map(([k, v]) => ({
+      label:    FLAG_LABELS[k] || k,
+      severity: v.severity,
+      detail:   v.detail || "",
+    }));
+
+  const severityDot = s => ({
+    high:   '<span style="color:#ef4444;font-weight:700">●</span>',
+    medium: '<span style="color:#f59e0b;font-weight:700">●</span>',
+    low:    '<span style="color:#3b82f6;font-weight:700">●</span>',
+  }[s] || "");
+
+  const habitsHtml = habits.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px">
+        ${habits.map(h => `<span style="font-size:10px;padding:2px 8px;border-radius:99px;background:${c.border};color:${c.text};font-weight:600">${h}</span>`).join("")}
+       </div>`
+    : "";
+
+  const flagsHtml = activeFlags.length
+    ? `<div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+        ${activeFlags.map(f => `
+          <div style="font-size:10px;display:flex;align-items:flex-start;gap:6px">
+            ${severityDot(f.severity)}
+            <span><strong>${f.label}</strong>${f.detail ? ` — ${f.detail}` : ""}</span>
+          </div>`).join("")}
+       </div>`
+    : "";
+
+  const geminiTag = data.gemini_active
+    ? `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:99px;background:#dbeafe;color:#1d4ed8;margin-left:6px">⚡ Gemini</span>`
+    : `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:99px;background:#f3f4f6;color:#6b7280;margin-left:6px">ML</span>`;
+
+  const banner = document.createElement("div");
+  banner.id = "sentinel-creator-banner";
+  banner.setAttribute("data-sentinel", "true");
+  banner.style.cssText = `
+    all: initial;
+    display: block;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-sizing: border-box;
+    margin: 10px 0;
+    border-radius: 12px;
+    border: 1.5px solid ${c.border};
+    background: ${c.bg};
+    overflow: hidden;
+    z-index: 9998;
+    animation: sentinelFadeIn 0.3s ease;
+  `;
+
+  banner.innerHTML = `
+    <style>
+      @keyframes sentinelFadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+      #sentinel-creator-banner * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+      #sentinel-creator-banner .s-cb-toggle { cursor:pointer; user-select:none; }
+      #sentinel-creator-banner .s-cb-body { overflow:hidden; transition: max-height 0.3s ease; max-height: 0; }
+      #sentinel-creator-banner .s-cb-body.open { max-height: 400px; }
+    </style>
+
+    <!-- Header row (always visible) -->
+    <div class="s-cb-toggle" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer"
+         onclick="this.closest('#sentinel-creator-banner').querySelector('.s-cb-body').classList.toggle('open');
+                  this.querySelector('.s-cb-chevron').style.transform = this.closest('#sentinel-creator-banner').querySelector('.s-cb-body').classList.contains('open') ? 'rotate(90deg)' : 'rotate(0deg)'">
+
+      <!-- Health score ring -->
+      <div style="position:relative;width:38px;height:38px;shrink:0">
+        <svg width="38" height="38" viewBox="0 0 38 38">
+          <circle cx="19" cy="19" r="15" fill="none" stroke="#e5e7eb" stroke-width="4"/>
+          <circle cx="19" cy="19" r="15" fill="none" stroke="${c.bar}" stroke-width="4"
+            stroke-dasharray="${Math.round(score * 0.942)} 94.2"
+            stroke-linecap="round" transform="rotate(-90 19 19)"/>
+        </svg>
+        <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:${c.text}">${score}</span>
+      </div>
+
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+          <span style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:${c.text}">${c.icon} ${c.label}</span>
+          ${geminiTag}
+        </div>
+        <div style="font-size:10px;color:#6b7280;margin-top:1px">
+          <strong style="color:#374151">${creator}</strong>${theme ? ` · ${theme}` : ""}
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:6px">
+        ${activeFlags.length ? `<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px;background:${c.bar};color:#fff">${activeFlags.length} flag${activeFlags.length > 1 ? "s" : ""}</span>` : ""}
+        <svg class="s-cb-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${c.text}" stroke-width="2.5" stroke-linecap="round" style="transition:transform 0.2s;flex-shrink:0">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Expandable body -->
+    <div class="s-cb-body">
+      <div style="padding:0 14px 12px;border-top:1px solid ${c.border}">
+
+        ${habitsHtml ? `<div style="margin-top:10px"><div style="font-size:9px;font-weight:700;letter-spacing:0.1em;color:#9ca3af;margin-bottom:2px">HABITS PROMOTED</div>${habitsHtml}</div>` : ""}
+
+        ${flagsHtml ? `<div style="margin-top:10px"><div style="font-size:9px;font-weight:700;letter-spacing:0.1em;color:#9ca3af;margin-bottom:4px">CONCERNS DETECTED</div>${flagsHtml}</div>` : ""}
+
+        <div style="margin-top:10px">
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.1em;color:#9ca3af;margin-bottom:3px">ANALYSIS</div>
+          <p style="font-size:11px;color:#374151;line-height:1.5;margin:0">${summary}</p>
+        </div>
+
+        ${rec ? `<div style="margin-top:8px;padding:7px 10px;border-radius:8px;background:rgba(0,0,0,0.04);font-size:10px;color:#6b7280;line-height:1.4">
+          💡 ${rec}
+        </div>` : ""}
+
+        <div style="margin-top:8px;text-align:right;font-size:8px;color:#d1d5db">Sentinel · Creator Safety Scanner</div>
+      </div>
+    </div>
+  `;
+
+  // Inject banner after the post's primary content block
+  const insertTarget = findPostInsertionPoint(extracted.platform);
+  if (insertTarget) {
+    insertTarget.parentNode.insertBefore(banner, insertTarget.nextSibling);
+  } else {
+    // Fallback: fixed bottom-right corner
+    banner.style.position  = "fixed";
+    banner.style.bottom    = "80px";
+    banner.style.right     = "20px";
+    banner.style.width     = "340px";
+    banner.style.zIndex    = "99999";
+    banner.style.boxShadow = "0 8px 32px rgba(0,0,0,0.15)";
+    document.body.appendChild(banner);
+  }
+  creatorBannerEl = banner;
+}
+
+function findPostInsertionPoint(platform) {
+  const selectors = {
+    youtube:   ["#above-the-fold", "#primary-inner ytd-watch-metadata", ".ytd-watch-metadata"],
+    instagram: ["article div[role='presentation']", "article", "main article"],
+    tiktok:    ["[data-e2e='browse-video-desc']", "[class*='DivVideoInfoContainer']", "[class*='video-info']"],
+    twitter:   ["[data-testid='tweetText']", "article [lang]"],
+    reddit:    ["[data-test-id='post-content']", "shreddit-post", "[slot='text-body']"],
+    threads:   ["[data-pressable-container]"],
+  };
+  const targets = selectors[platform] || [];
+  for (const sel of targets) {
+    const el = document.querySelector(sel);
+    if (el) return el;
+  }
+  return null;
+}
 const PLATFORM_SELECTORS = {
   "twitter.com":   '[data-testid="tweetText"]',
   "x.com":         '[data-testid="tweetText"]',
@@ -312,9 +643,448 @@ function injectUI() {
   const root = document.createElement("div");
   root.id = "sentinel-root";
   root.innerHTML = `
-    <div id="s-bubble" title="Sentinel">
-      <svg viewBox="0 0 40 40"><polygon points="20,4 23,17 36,20 23,23 20,36 17,23 4,20 17,17" fill="#E8253A"/><circle cx="20" cy="20" r="15" fill="none" stroke="#5DD879" stroke-width="2.5"/></svg>
+
+    <!-- ── Floating bubble ── -->
+    <div id="s-bubble" title="Open Sentinel">
+      <div id="s-bubble-dot"></div>
+      <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M14 3L24 7.5V14C24 19.25 19.6 24.1 14 25.5C8.4 24.1 4 19.25 4 14V7.5L14 3Z" fill="rgba(255,255,255,0.3)" stroke="white" stroke-width="1.8" stroke-linejoin="round"/>
+        <path d="M10 14l2.5 2.5L18 11" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
     </div>
+
+    <!-- ── Main panel ── -->
+    <div id="s-panel" class="s-closed">
+
+      <!-- HOME SCREEN -->
+      <div id="s-home" class="s-screen s-active">
+        <div class="s-home-header">
+          <div class="s-logo-lockup">
+            <div class="s-logo-badge">
+              <svg viewBox="0 0 28 28" fill="none"><path d="M14 3L24 7.5V14C24 19.25 19.6 24.1 14 25.5C8.4 24.1 4 19.25 4 14V7.5L14 3Z" fill="rgba(255,255,255,0.35)" stroke="white" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 14l2.5 2.5L18 11" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div>
+              <div class="s-brand-name">Sentinel</div>
+              <span class="s-brand-tag">YOUR SAFETY COMPANION</span>
+            </div>
+          </div>
+          <div class="s-header-actions">
+            <button class="s-dash-btn" id="s-open-dash">⬡ Dashboard</button>
+            <button class="s-icon-btn" id="s-close" title="Close">✕</button>
+          </div>
+        </div>
+
+        <!-- Hero card -->
+        <div class="s-hero">
+          <div class="s-hero-greeting">👋 Hey there!</div>
+          <div class="s-hero-title">What would you like me to check?</div>
+          <div class="s-hero-sub">I'll scan this page and flag anything that looks off — in real time.</div>
+          <div class="s-hero-stats">
+            <div class="s-hero-stat">
+              <div class="s-hero-stat-val" id="home-scans-today">0</div>
+              <div class="s-hero-stat-lbl">SCANS TODAY</div>
+            </div>
+            <div class="s-hero-stat">
+              <div class="s-hero-stat-val" id="home-flags-total">0</div>
+              <div class="s-hero-stat-lbl">FLAGS CAUGHT</div>
+            </div>
+            <div class="s-hero-stat">
+              <div class="s-hero-stat-val" id="home-streak">🔥 0</div>
+              <div class="s-hero-stat-lbl">DAY STREAK</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="s-section-label">CHOOSE A SCAN MODE</div>
+
+        <div class="s-mode-grid">
+          <button class="s-mode-card s-mode-tox" data-mode="toxicity">
+            <div class="s-mode-emoji-wrap">🛑</div>
+            <div class="s-mode-info">
+              <div class="s-mode-name">Toxicity Check</div>
+              <div class="s-mode-desc">Cyberbullying · Hate speech · Harassment</div>
+            </div>
+            <div class="s-mode-pill">NEW</div>
+          </button>
+          <button class="s-mode-card s-mode-mis" data-mode="misinfo">
+            <div class="s-mode-emoji-wrap">🔍</div>
+            <div class="s-mode-info">
+              <div class="s-mode-name">Fact Check</div>
+              <div class="s-mode-desc">Misinformation · Manipulation · AI text</div>
+            </div>
+            <div class="s-mode-pill">AI</div>
+          </button>
+          <button class="s-mode-card s-mode-scam" data-mode="scam">
+            <div class="s-mode-emoji-wrap">🔐</div>
+            <div class="s-mode-info">
+              <div class="s-mode-name">Scam Shield</div>
+              <div class="s-mode-desc">Phishing · Fraud · Malicious links</div>
+            </div>
+            <div class="s-mode-pill">LIVE</div>
+          </button>
+        </div>
+
+        <div class="s-settings-row">
+          <button class="s-settings-btn" id="s-open-settings">
+            ⚙️ Sensitivity settings
+          </button>
+          <div class="s-version-tag">v8.0</div>
+        </div>
+      </div>
+
+      <!-- TOXICITY SCREEN -->
+      <div id="s-screen-toxicity" class="s-screen s-scan-screen">
+        <div class="s-scan-header">
+          <button class="s-back-btn" data-back="toxicity">← Back</button>
+          <div class="s-screen-chip s-chip-tox">🛑 Toxicity</div>
+          <button class="s-close-btn" id="s-close-tox">✕</button>
+        </div>
+        <div class="s-score-card" id="tox-score-card">
+          <div class="s-score-ring-wrap">
+            <svg width="72" height="72" viewBox="0 0 72 72">
+              <circle class="s-score-ring-bg" cx="36" cy="36" r="30"/>
+              <circle class="s-score-ring-fg" id="tox-ring" cx="36" cy="36" r="30"
+                stroke="#F43F5E" stroke-dasharray="188.5" stroke-dashoffset="188.5"/>
+            </svg>
+            <div class="s-score-inner">
+              <div class="s-score-num" id="tox-pct">0%</div>
+              <div class="s-score-lbl">RISK</div>
+            </div>
+          </div>
+          <div class="s-score-info">
+            <div class="s-score-verdict" id="tox-verdict">Ready to scan</div>
+            <div class="s-score-detail" id="tox-detail">Hit scan to check this page for toxic content, hate speech, and cyberbullying.</div>
+          </div>
+        </div>
+        <div class="s-actions">
+          <button class="s-scan-btn s-btn-tox" id="tox-scan">▶ Scan Page</button>
+          <button class="s-clear-btn" id="tox-clear">Clear</button>
+        </div>
+        <div class="s-analysis-box" id="tox-writeup">
+          <div class="s-analysis-label">Gemini Analysis</div>
+          <div class="s-analysis-text" id="tox-writeup-text">Run a scan to see the AI analysis.</div>
+        </div>
+        <div class="s-flags-section">
+          <div class="s-flags-header">
+            <div class="s-flags-title">Flagged Content</div>
+            <div class="s-flags-count" id="tox-flag-count">0</div>
+          </div>
+          <div class="s-flags-list" id="tox-flags">
+            <div class="s-no-flags">
+              <div class="s-no-flags-emoji">✨</div>
+              <div class="s-no-flags-text">Nothing flagged yet</div>
+            </div>
+          </div>
+        </div>
+        <div class="s-status">
+          <div class="s-status-dot" id="tox-dot"></div>
+          <div class="s-status-text" id="tox-status">Ready</div>
+        </div>
+      </div>
+
+      <!-- MISINFO SCREEN -->
+      <div id="s-screen-misinfo" class="s-screen s-scan-screen">
+        <div class="s-scan-header">
+          <button class="s-back-btn" data-back="misinfo">← Back</button>
+          <div class="s-screen-chip s-chip-mis">🔍 Fact Check</div>
+          <button class="s-close-btn" id="s-close-mis">✕</button>
+        </div>
+        <div class="s-score-card">
+          <div class="s-score-ring-wrap">
+            <svg width="72" height="72" viewBox="0 0 72 72">
+              <circle class="s-score-ring-bg" cx="36" cy="36" r="30"/>
+              <circle class="s-score-ring-fg" id="mis-ring" cx="36" cy="36" r="30"
+                stroke="#F59E0B" stroke-dasharray="188.5" stroke-dashoffset="188.5"/>
+            </svg>
+            <div class="s-score-inner">
+              <div class="s-score-num" id="mis-pct">0%</div>
+              <div class="s-score-lbl">RISK</div>
+            </div>
+          </div>
+          <div class="s-score-info">
+            <div class="s-score-verdict" id="mis-verdict">Ready to scan</div>
+            <div class="s-score-detail" id="mis-detail">I'll check for misinformation, manipulation tactics, and AI-generated text.</div>
+          </div>
+        </div>
+        <div class="s-toggles-box">
+          <div class="s-toggle-row">
+            <div class="s-toggle-icon">🖼️</div>
+            <div class="s-toggle-name">AI Image Detection<div class="s-toggle-hint">Hover over any image</div></div>
+            <label class="s-toggle"><input type="checkbox" id="img-detect-toggle"><div class="s-toggle-track"></div></label>
+          </div>
+          <div class="s-toggle-row">
+            <div class="s-toggle-icon">✍️</div>
+            <div class="s-toggle-name">AI Text Checker<div class="s-toggle-hint">Highlight any text</div></div>
+            <label class="s-toggle"><input type="checkbox" id="text-ai-toggle"><div class="s-toggle-track"></div></label>
+          </div>
+        </div>
+        <div class="s-bars-box">
+          <div class="s-bar-row">
+            <div class="s-bar-label">Misinfo</div>
+            <div class="s-bar-track"><div class="s-bar-fill s-fill-mis" id="mis-bar"></div></div>
+            <div class="s-bar-pct" id="mis-bar-pct">—</div>
+          </div>
+          <div class="s-bar-row">
+            <div class="s-bar-label">Manipulation</div>
+            <div class="s-bar-track"><div class="s-bar-fill s-fill-manip" id="manip-bar"></div></div>
+            <div class="s-bar-pct" id="manip-pct">—</div>
+          </div>
+        </div>
+        <div class="s-actions">
+          <button class="s-scan-btn s-btn-mis" id="mis-scan">▶ Scan Page</button>
+          <button class="s-clear-btn" id="mis-clear">Clear</button>
+        </div>
+        <div class="s-ai-result-box" id="ai-text-result">
+          <div class="s-ai-result-label">Selected Text — AI Analysis</div>
+          <div class="s-ai-meter">
+            <div class="s-ai-track"><div class="s-ai-bar" id="ai-text-bar"></div></div>
+            <div class="s-ai-pct" id="ai-text-pct">—</div>
+          </div>
+          <div class="s-ai-verdict" id="ai-text-verdict"></div>
+        </div>
+        <div class="s-analysis-box" id="mis-writeup">
+          <div class="s-analysis-label">Gemini Analysis</div>
+          <div class="s-analysis-text" id="mis-writeup-text">Run a scan to see the AI analysis.</div>
+        </div>
+        <div class="s-flags-section">
+          <div class="s-flags-header">
+            <div class="s-flags-title">Flagged Content</div>
+            <div class="s-flags-count" id="mis-flag-count">0</div>
+          </div>
+          <div class="s-flags-list" id="mis-flags">
+            <div class="s-no-flags">
+              <div class="s-no-flags-emoji">✨</div>
+              <div class="s-no-flags-text">Nothing flagged yet</div>
+            </div>
+          </div>
+        </div>
+        <div class="s-status">
+          <div class="s-status-dot" id="mis-dot"></div>
+          <div class="s-status-text" id="mis-status">Ready</div>
+        </div>
+      </div>
+
+      <!-- SCAM SCREEN -->
+      <div id="s-screen-scam" class="s-screen s-scan-screen">
+        <div class="s-scan-header">
+          <button class="s-back-btn" data-back="scam">← Back</button>
+          <div class="s-screen-chip s-chip-scam">🔐 Scam Shield</div>
+          <button class="s-close-btn" id="s-close-scam">✕</button>
+        </div>
+        <div class="s-url-box">
+          <div class="s-url-label">Current Page</div>
+          <div class="s-url-val" id="scam-url-val">${location.hostname}</div>
+          <div class="s-chips-row" id="scam-threat-indicators">
+            <div class="s-url-chip" id="chip-https"><div class="s-chip-dot"></div>HTTPS</div>
+            <div class="s-url-chip" id="chip-typo"><div class="s-chip-dot"></div>Typosquat</div>
+            <div class="s-url-chip" id="chip-urgent"><div class="s-chip-dot"></div>Urgency</div>
+            <div class="s-url-chip" id="chip-data"><div class="s-chip-dot"></div>Data harvest</div>
+          </div>
+        </div>
+        <div class="s-bars-box">
+          <div class="s-bar-row">
+            <div class="s-bar-label">Phishing risk</div>
+            <div class="s-bar-track"><div class="s-bar-fill s-fill-scam" id="scam-bar"></div></div>
+            <div class="s-bar-pct" id="scam-pct">—</div>
+          </div>
+          <div class="s-bar-row">
+            <div class="s-bar-label">Social eng.</div>
+            <div class="s-bar-track"><div class="s-bar-fill s-fill-phish" id="social-eng-bar"></div></div>
+            <div class="s-bar-pct" id="social-eng-pct">—</div>
+          </div>
+        </div>
+        <div class="s-actions">
+          <button class="s-scan-btn s-btn-scam" id="scam-scan">▶ Scan Page</button>
+          <button class="s-clear-btn" id="scam-clear">Clear</button>
+        </div>
+        <div class="s-analysis-box" id="scam-writeup">
+          <div class="s-analysis-label">Gemini Threat Analysis</div>
+          <div class="s-analysis-text" id="scam-writeup-text">Run a scan to detect threats.</div>
+        </div>
+        <div class="s-flags-section">
+          <div class="s-flags-header">
+            <div class="s-flags-title">Suspicious Links</div>
+            <div class="s-flags-count" id="scam-link-count">0</div>
+          </div>
+          <div class="s-flags-list" id="scam-links">
+            <div class="s-no-flags">
+              <div class="s-no-flags-emoji">🔗</div>
+              <div class="s-no-flags-text">No suspicious links found</div>
+            </div>
+          </div>
+          <div class="s-flags-header" style="margin-top:10px">
+            <div class="s-flags-title">Flagged Content</div>
+            <div class="s-flags-count" id="scam-flag-count">0</div>
+          </div>
+          <div class="s-flags-list" id="scam-flags">
+            <div class="s-no-flags">
+              <div class="s-no-flags-emoji">✨</div>
+              <div class="s-no-flags-text">Nothing flagged yet</div>
+            </div>
+          </div>
+        </div>
+        <div class="s-status">
+          <div class="s-status-dot" id="scam-dot"></div>
+          <div class="s-status-text" id="scam-status">Ready</div>
+        </div>
+      </div>
+
+      <!-- SETTINGS SCREEN -->
+      <div id="s-screen-settings" class="s-screen">
+        <div class="s-settings-header">
+          <button class="s-back-btn" id="s-settings-back">← Back</button>
+          <div class="s-settings-title">⚙️ My Preferences</div>
+          <button class="s-close-btn" id="s-close-settings">✕</button>
+        </div>
+        <div class="s-settings-body">
+
+          <div class="s-settings-group">
+            <div class="s-settings-group-title">🎯 Sensitivity — I'm extra careful about</div>
+            <div class="s-pref-row">
+              <div class="s-pref-emoji">🥗</div>
+              <div class="s-pref-info">
+                <div class="s-pref-name">Diet & Fitness Content</div>
+                <div class="s-pref-hint">Flags extreme diet/workout advice earlier</div>
+              </div>
+              <label class="s-toggle"><input type="checkbox" id="pref-diet"><div class="s-toggle-track"></div></label>
+            </div>
+            <div class="s-pref-row">
+              <div class="s-pref-emoji">💸</div>
+              <div class="s-pref-info">
+                <div class="s-pref-name">Financial & Crypto Content</div>
+                <div class="s-pref-hint">Lower threshold for get-rich-quick signals</div>
+              </div>
+              <label class="s-toggle"><input type="checkbox" id="pref-finance"><div class="s-toggle-track"></div></label>
+            </div>
+            <div class="s-pref-row">
+              <div class="s-pref-emoji">🗳️</div>
+              <div class="s-pref-info">
+                <div class="s-pref-name">Political Content</div>
+                <div class="s-pref-hint">Heightened misinfo detection on political topics</div>
+              </div>
+              <label class="s-toggle"><input type="checkbox" id="pref-politics"><div class="s-toggle-track"></div></label>
+            </div>
+            <div class="s-pref-row">
+              <div class="s-pref-emoji">🎰</div>
+              <div class="s-pref-info">
+                <div class="s-pref-name">Gambling & Substances</div>
+                <div class="s-pref-hint">Flags addiction-promoting content</div>
+              </div>
+              <label class="s-toggle"><input type="checkbox" id="pref-addiction"><div class="s-toggle-track"></div></label>
+            </div>
+            <div class="s-pref-row">
+              <div class="s-pref-emoji">🧠</div>
+              <div class="s-pref-info">
+                <div class="s-pref-name">Mental Health Content</div>
+                <div class="s-pref-hint">Alert on self-esteem attacks & doomscrolling bait</div>
+              </div>
+              <label class="s-toggle"><input type="checkbox" id="pref-mental"><div class="s-toggle-track"></div></label>
+            </div>
+          </div>
+
+          <div class="s-settings-group">
+            <div class="s-settings-group-title">🔔 Alert Threshold</div>
+            <div class="s-pref-row">
+              <div class="s-pref-emoji">📊</div>
+              <div class="s-pref-info">
+                <div class="s-pref-name">Show warnings at</div>
+                <div class="s-pref-hint">How sensitive should alerts be?</div>
+              </div>
+              <select class="s-threshold-select" id="pref-threshold">
+                <option value="low">Low risk</option>
+                <option value="medium" selected>Medium risk</option>
+                <option value="high">High risk only</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="s-settings-group">
+            <div class="s-settings-group-title">📈 Behavior Tracking</div>
+            <div class="s-pref-row">
+              <div class="s-pref-emoji">⏱️</div>
+              <div class="s-pref-info">
+                <div class="s-pref-name">Dwell Time Tracking</div>
+                <div class="s-pref-hint">Logs time spent on flagged pages</div>
+              </div>
+              <label class="s-toggle"><input type="checkbox" id="pref-dwell" checked><div class="s-toggle-track"></div></label>
+            </div>
+            <div class="s-pref-row">
+              <div class="s-pref-emoji">🖱️</div>
+              <div class="s-pref-info">
+                <div class="s-pref-name">Scroll Behavior</div>
+                <div class="s-pref-hint">Detects rapid scroll-away from content</div>
+              </div>
+              <label class="s-toggle"><input type="checkbox" id="pref-behavior" checked><div class="s-toggle-track"></div></label>
+            </div>
+          </div>
+
+          <div class="s-stats-box">
+            <div class="s-stats-title">📊 My Sentinel Stats</div>
+            <div class="s-stats-grid">
+              <div class="s-stat-chip">
+                <div class="s-stat-val" id="stat-scans">0</div>
+                <div class="s-stat-lbl">Total Scans</div>
+              </div>
+              <div class="s-stat-chip">
+                <div class="s-stat-val" id="stat-flags">0</div>
+                <div class="s-stat-lbl">Flags Caught</div>
+              </div>
+              <div class="s-stat-chip">
+                <div class="s-stat-val" id="stat-reactions">0</div>
+                <div class="s-stat-lbl">Reactions Logged</div>
+              </div>
+              <div class="s-stat-chip">
+                <div class="s-stat-val" id="stat-creators">0</div>
+                <div class="s-stat-lbl">Creators Scanned</div>
+              </div>
+            </div>
+            <button class="s-clear-data-btn" id="s-clear-data">🗑️ Clear My Data</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Image hover tooltip -->
+    <div id="s-img-tooltip" style="display:none">
+      <div class="s-img-tip-header">🖼️ AI Image Analysis</div>
+      <div class="s-img-tip-track"><div class="s-img-tip-bar" id="img-tip-bar"></div></div>
+      <div class="s-img-tip-verdict" id="img-tip-verdict">Analyzing…</div>
+      <div class="s-img-tip-signals" id="img-tip-signals"></div>
+    </div>
+  `;
+  document.body.appendChild(root);
+
+  // ── Wire events ────────────────────────────────────────────────────────────
+  document.getElementById("s-bubble").addEventListener("click", toggleSidebar);
+  document.querySelectorAll(".s-close-btn").forEach(b => b.addEventListener("click", closeSidebar));
+  document.querySelectorAll(".s-mode-card").forEach(b => b.addEventListener("click", () => goMode(b.dataset.mode)));
+  document.querySelectorAll(".s-back-btn[data-back]").forEach(b => b.addEventListener("click", goHome));
+  document.getElementById("s-open-settings").addEventListener("click", goSettings);
+  document.getElementById("s-settings-back").addEventListener("click", goHome);
+  document.getElementById("tox-scan").addEventListener("click",  () => runScan("toxicity"));
+  document.getElementById("tox-clear").addEventListener("click", clearHighlights);
+  document.getElementById("mis-scan").addEventListener("click",  () => runScan("misinfo"));
+  document.getElementById("mis-clear").addEventListener("click", clearHighlights);
+  document.getElementById("scam-scan").addEventListener("click", () => runScan("scam"));
+  document.getElementById("scam-clear").addEventListener("click", clearHighlights);
+  document.getElementById("img-detect-toggle").addEventListener("change", e => { imageDetectOn = e.target.checked; toggleImageDetect(imageDetectOn); });
+  document.getElementById("text-ai-toggle").addEventListener("change", e => { textAiOn = e.target.checked; toggleTextAi(textAiOn); });
+  document.getElementById("s-open-dash").addEventListener("click", () => window.open(DASHBOARD_URL, "sentinel-dashboard"));
+  document.getElementById("s-clear-data").addEventListener("click", () => {
+    if (confirm("Clear all Sentinel data? This can't be undone.")) {
+      behaviorLog = []; saveBehaviorLog();
+      try { chrome.storage.local.remove(["sentinelStats"]); } catch {}
+      updateStats();
+    }
+  });
+
+  bindSettingsEvents();
+  syncSettingsUI();
+  updateStats();
+  runUrlChecks();
+  loadStats();
+}
 
     <div id="s-panel" class="s-closed">
       <!-- HOME -->
@@ -461,27 +1231,7 @@ function injectUI() {
       <div class="s-img-tip-signals" id="img-tip-signals"></div>
     </div>
   `;
-  document.body.appendChild(root);
-
-  // Wire events
-  document.getElementById("s-bubble").addEventListener("click", toggleSidebar);
-  document.querySelectorAll(".s-close-btn").forEach(b => b.addEventListener("click", closeSidebar));
-  document.querySelectorAll(".s-mode-card").forEach(b => b.addEventListener("click", () => goMode(b.dataset.mode)));
-  document.querySelectorAll(".s-back-btn").forEach(b => b.addEventListener("click", goHome));
-
-  document.getElementById("tox-scan").addEventListener("click", () => runScan("toxicity"));
-  document.getElementById("tox-clear").addEventListener("click", clearHighlights);
-  document.getElementById("mis-scan").addEventListener("click", () => runScan("misinfo"));
-  document.getElementById("mis-clear").addEventListener("click", clearHighlights);
-  document.getElementById("img-detect-toggle").addEventListener("change", e => { imageDetectOn = e.target.checked; toggleImageDetect(imageDetectOn); });
-  document.getElementById("text-ai-toggle").addEventListener("change", e => { textAiOn = e.target.checked; toggleTextAi(textAiOn); });
-  document.getElementById("scam-scan").addEventListener("click", () => runScan("scam"));
-  document.getElementById("scam-clear").addEventListener("click", clearHighlights);
-  document.getElementById("s-open-dash").addEventListener("click", () => {
-    window.open(DASHBOARD_URL, "sentinel-dashboard");
-  });
-
-  runUrlChecks();
+  // (old injectUI body — replaced above)
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -509,6 +1259,44 @@ function goHome() {
   document.getElementById("s-home").classList.add("s-active");
   clearHighlights();
 }
+function goSettings() {
+  document.querySelectorAll(".s-screen").forEach(s => s.classList.remove("s-active"));
+  document.getElementById("s-screen-settings").classList.add("s-active");
+  syncSettingsUI();
+  loadStats();
+}
+
+// ── Stats helpers ─────────────────────────────────────────────────────────────
+let sessionStats = { scans: 0, flags: 0, reactions: 0, creators: 0 };
+
+function loadStats() {
+  try {
+    chrome.storage.local.get("sentinelStats", (res) => {
+      if (res.sentinelStats) sessionStats = { ...sessionStats, ...res.sentinelStats };
+      updateStats();
+    });
+  } catch { updateStats(); }
+}
+
+function incrementStat(key, amount = 1) {
+  sessionStats[key] = (sessionStats[key] || 0) + amount;
+  try { chrome.storage.local.set({ sentinelStats: sessionStats }); } catch {}
+  updateStats();
+}
+
+function updateStats() {
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set("home-scans-today", sessionStats.scans || 0);
+  set("home-flags-total", sessionStats.flags || 0);
+  set("home-streak", `🔥 ${sessionStats.streak || 1}`);
+  set("stat-scans",     sessionStats.scans     || 0);
+  set("stat-flags",     sessionStats.flags     || 0);
+  set("stat-reactions", sessionStats.reactions  || 0);
+  set("stat-creators",  sessionStats.creators   || 0);
+  // Show notification dot if flags found today
+  const dot = document.getElementById("s-bubble-dot");
+  if (dot) dot.classList.toggle("visible", (sessionStats.flags || 0) > 0);
+}
 
 // ── Scan ──────────────────────────────────────────────────────────────────────
 async function runScan(mode) {
@@ -518,6 +1306,12 @@ async function runScan(mode) {
 
   const extracted = extractText();
   const text = extracted.text;
+
+  // Trigger creator health scan on social platforms (runs in parallel, non-blocking)
+  if (extracted.platform && extracted.platform !== "unknown") {
+    runCreatorScan(extracted).catch(e => console.warn("[Sentinel] Creator scan error:", e));
+  }
+
   if (!text || text.trim().length < 20) {
     setStatus(mode, "Not enough text on page");
     isScanning = false;
@@ -543,11 +1337,17 @@ async function runScan(mode) {
       body: JSON.stringify({ text, mode, url: location.href }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    let data = await res.json();
     lastFlags = data.flags || [];
 
     // Cache the result
     scanCache.set(cacheKey, { data, timestamp: Date.now() });
+
+    // Apply sensitivity profile — may escalate severity
+    data = applySensitivityFilter(data, extracted);
+
+    // Start dwell tracking for flagged pages
+    startDwellTracking(data, extracted);
 
     observerPaused = true;
     clearHighlights();
@@ -572,7 +1372,16 @@ async function runScan(mode) {
     });
 
     const count = lastFlags.length;
-    setStatus(mode, count > 0 ? `${count} flag(s) detected` : "No issues found");
+    const boosted = data._sensitivity_boosted ? " (sensitivity active)" : "";
+    setStatus(mode, count > 0 ? `${count} flag(s) detected${boosted}` : "✅ All clear!");
+
+    // Track stats
+    incrementStat("scans");
+    if (count > 0) incrementStat("flags", count);
+
+    // Inject reaction buttons into the active scan panel
+    const panelFlagsId = mode === "toxicity" ? "tox-flags" : mode === "misinfo" ? "mis-flags" : "scam-flags";
+    injectReactionButton(panelFlagsId, data, extracted);
   } catch(e) {
     setStatus(mode, "Backend unreachable");
     console.warn("[Sentinel]", e);
@@ -594,32 +1403,96 @@ function applyResultsToUI(mode, data, flags, extracted) {
   }
 }
 
-// ── UI updaters (same as v5 content.js) ──────────────────────────────────────
+// ── UI updaters ───────────────────────────────────────────────────────────────
+function animateRing(ringId, pct, color) {
+  const ring = document.getElementById(ringId);
+  if (!ring) return;
+  const circumference = 188.5; // 2π × r=30
+  const offset = circumference - (circumference * pct / 100);
+  ring.style.strokeDashoffset = offset;
+  ring.style.stroke = color;
+}
+
+function setVerdict(verdictId, detailId, pct, labels) {
+  const vEl = document.getElementById(verdictId);
+  const dEl = document.getElementById(detailId);
+  const { safe, low, medium, high } = labels;
+  if (pct > 65)      { if (vEl) vEl.textContent = high.title;   if (dEl) dEl.textContent = high.detail; }
+  else if (pct > 35) { if (vEl) vEl.textContent = medium.title; if (dEl) dEl.textContent = medium.detail; }
+  else if (pct > 10) { if (vEl) vEl.textContent = low.title;    if (dEl) dEl.textContent = low.detail; }
+  else               { if (vEl) vEl.textContent = safe.title;   if (dEl) dEl.textContent = safe.detail; }
+}
+
 function updateToxicityUI(data) {
-  const pct = Math.round((data.toxicity || 0) * 100);
-  const offset = 213.6 - (213.6 * pct / 100);
-  const ring = document.getElementById("tox-ring");
-  if (ring) { ring.style.strokeDashoffset = offset; ring.style.stroke = pct > 65 ? "#E8253A" : pct > 35 ? "#F5A623" : "#5DD879"; }
+  const pct   = Math.round((data.toxicity || 0) * 100);
+  const color = pct > 65 ? "#F43F5E" : pct > 35 ? "#F59E0B" : "#10B981";
+  animateRing("tox-ring", pct, color);
   const pctEl = document.getElementById("tox-pct");
   if (pctEl) pctEl.textContent = pct + "%";
-  renderFlags("tox-flags", lastFlags.filter(f => f.type === "toxicity"), "toxicity");
-  generateWriteup("tox-writeup-text", lastFlags.filter(f => f.type === "toxicity"), "toxicity", pct);
+  setVerdict("tox-verdict", "tox-detail", pct, {
+    safe:   { title: "✅ All clear!",           detail: "No toxic language detected on this page." },
+    low:    { title: "🟡 Minor signals",         detail: "A few potentially unkind phrases — nothing serious." },
+    medium: { title: "⚠️ Toxic content found",   detail: "Harmful language patterns detected. Approach with caution." },
+    high:   { title: "🚨 High toxicity!",        detail: "Strong harassment or hate speech patterns present." },
+  });
+  const tflags = lastFlags.filter(f => f.type === "toxicity" || f.type === "toxicity");
+  renderFlags("tox-flags", "tox-flag-count", tflags);
+  generateWriteup("tox-writeup-text", data, tflags, "toxicity", pct);
 }
 
 function updateMisinfoUI(data) {
-  setBar("mis-bar",   "mis-pct",   Math.round((data.misinfo || 0) * 100));
-  setBar("manip-bar", "manip-pct", Math.round((data.manipulation || 0) * 100));
+  const misPct   = Math.round((data.misinfo      || 0) * 100);
+  const manipPct = Math.round((data.manipulation || 0) * 100);
+  setBar("mis-bar",   "mis-bar-pct",  misPct);
+  setBar("manip-bar", "manip-pct",    manipPct);
+
+  // Update mis ring based on higher of the two
+  const topPct  = Math.max(misPct, manipPct);
+  const misColor = topPct > 65 ? "#F43F5E" : topPct > 35 ? "#F59E0B" : "#10B981";
+  animateRing("mis-ring", topPct, misColor);
+  const misPctEl = document.getElementById("mis-pct");
+  if (misPctEl) misPctEl.textContent = topPct + "%";
+  setVerdict("mis-verdict", "mis-detail", topPct, {
+    safe:   { title: "✅ Looks legit!",          detail: "No significant misinformation patterns found." },
+    low:    { title: "🟡 Some spin detected",     detail: "A few persuasion tactics — check sources independently." },
+    medium: { title: "⚠️ Misleading content",    detail: "Manipulation or unverified claims detected." },
+    high:   { title: "🚨 High misinfo risk!",     detail: "Strong indicators of false or manipulative content." },
+  });
+
   const rel = lastFlags.filter(f => ["misinfo","manipulation","ai"].includes(f.type));
-  renderFlags("mis-flags", rel, "misinfo");
-  generateWriteup("mis-writeup-text", rel, "misinfo", Math.round((data.misinfo||0)*100));
+  renderFlags("mis-flags", "mis-flag-count", rel);
+  generateWriteup("mis-writeup-text", data, rel, "misinfo", topPct);
+
+  // AI text score panel
+  const aiPct = Math.round((data.ai_score || 0) * 100);
+  if (aiPct > 20) {
+    const aiBox = document.getElementById("ai-text-result");
+    if (aiBox) aiBox.style.display = "block";
+    const aiBar = document.getElementById("ai-text-bar");
+    if (aiBar) aiBar.style.width = aiPct + "%";
+    const aiPctEl = document.getElementById("ai-text-pct");
+    if (aiPctEl) aiPctEl.textContent = aiPct + "%";
+    const aiVerdict = document.getElementById("ai-text-verdict");
+    if (aiVerdict) {
+      aiVerdict.textContent = aiPct > 65
+        ? "This content shows strong signals of being AI-generated."
+        : aiPct > 35
+        ? "Some AI-writing patterns detected — may be AI-assisted."
+        : "Mostly human-written, with minor AI-style markers.";
+    }
+  }
 }
 
 function updateScamUI(data) {
-  setBar("scam-bar",       "scam-pct",       Math.round((data.scam_score  || 0) * 100));
-  setBar("social-eng-bar", "social-eng-pct", Math.round((data.manipulation|| 0) * 100));
-  renderFlags("scam-flags", lastFlags.filter(f => ["scam","phishing"].includes(f.type)), "scam");
+  const scamPct   = Math.round((data.scam_score   || 0) * 100);
+  const manipPct  = Math.round((data.manipulation || 0) * 100);
+  setBar("scam-bar",       "scam-pct",       scamPct);
+  setBar("social-eng-bar", "social-eng-pct", manipPct);
+  const scamColor = scamPct > 65 ? "#F43F5E" : scamPct > 35 ? "#F59E0B" : "#10B981";
+  const scamFlags = lastFlags.filter(f => ["scam","phishing"].includes(f.type));
+  renderFlags("scam-flags", "scam-flag-count", scamFlags);
   renderLinks("scam-links");
-  generateWriteup("scam-writeup-text", lastFlags, "scam", Math.round((data.scam_score||0)*100));
+  generateWriteup("scam-writeup-text", data, scamFlags, "scam", scamPct);
 }
 
 function setBar(barId, pctId, pct) {
@@ -629,44 +1502,73 @@ function setBar(barId, pctId, pct) {
   if (lbl) lbl.textContent = pct + "%";
 }
 
-function generateWriteup(elId, flags, mode, score) {
+function generateWriteup(elId, data, flags, mode, score) {
   const el = document.getElementById(elId);
   if (!el) return;
-  if (!flags.length) {
-    el.textContent = score < 20 ? "No significant patterns detected." : "Low-level signals detected — content appears mostly safe.";
+
+  // Use Gemini reasoning if available
+  const reasoning = data.reasoning || {};
+  const geminiText = reasoning[mode === "toxicity" ? "toxicity" : mode === "misinfo" ? "misinfo" : "scam_score"] || reasoning.summary;
+  if (geminiText) { el.textContent = geminiText; return; }
+
+  // Friendly fallback writeups
+  if (!flags.length || score < 10) {
+    el.textContent = "Everything looks good here! No significant issues detected on this page.";
     return;
   }
-  // Prioritize high-severity flags in the writeup
   const highFlags = flags.filter(f => f.severity === "high");
-  const topFlags  = (highFlags.length ? highFlags : flags).slice(0, 3);
-  const phrases   = topFlags.map(f => `"${f.phrase.slice(0, 40)}"`).join(", ");
-  const writeups = {
-    toxicity: `${flags.length} harmful pattern(s) found: ${phrases}. ${score > 65 ? "HIGH RISK — targeted harassment or hate speech patterns present." : "Moderate signals — review flagged content before engaging."}`,
-    misinfo:  `${flags.length} misinformation signal(s): ${phrases}. ${score > 65 ? "HIGH likelihood of misleading or manipulative content." : "Some persuasion tactics or unverified claims detected."}`,
-    scam:     `${flags.length} threat indicator(s): ${phrases}. ${score > 65 ? "HIGH THREAT — do not submit personal information on this page." : "Scam patterns present — proceed with caution."}`,
+  const topFlags  = (highFlags.length ? highFlags : flags).slice(0, 2);
+  const phrases   = topFlags.map(f => `"${f.phrase.slice(0, 35)}"`).join(" and ");
+  const writeups  = {
+    toxicity: score > 65
+      ? `⚠️ Flagged ${flags.length} harmful pattern(s) including ${phrases}. This page contains strong harassment or hate speech signals.`
+      : `Found ${flags.length} potentially unkind phrase(s) including ${phrases}. Worth being cautious engaging here.`,
+    misinfo:  score > 65
+      ? `🔍 Detected ${flags.length} misinformation signal(s) including ${phrases}. This content may be misleading — verify with trusted sources.`
+      : `Spotted ${flags.length} persuasion tactic(s) including ${phrases}. Some claims may be unverified.`,
+    scam:     score > 65
+      ? `🚨 ${flags.length} threat indicator(s) found including ${phrases}. Do not enter personal information on this page!`
+      : `Found ${flags.length} suspicious pattern(s) including ${phrases}. Proceed with caution.`,
   };
-  el.textContent = writeups[mode] || "Analysis complete.";
+  el.textContent = writeups[mode] || "Scan complete — review flagged items above.";
 }
 
-function renderFlags(containerId, flags, mode) {
-  const el = document.getElementById(containerId);
+function renderFlags(containerId, countId, flags) {
+  const el    = document.getElementById(containerId);
+  const cntEl = document.getElementById(countId);
   if (!el) return;
-  if (!flags.length) { el.innerHTML = `<div class="s-no-flags">No flags detected</div>`; return; }
+  if (cntEl) cntEl.textContent = flags.length;
+
+  if (!flags.length) {
+    el.innerHTML = `
+      <div class="s-no-flags">
+        <div class="s-no-flags-emoji">✨</div>
+        <div class="s-no-flags-text">Nothing flagged — looking clean!</div>
+      </div>`;
+    return;
+  }
+
   const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  const colorMap = { toxicity:"#E8253A", manipulation:"#F5A623", misinfo:"#4A8FE8", ai:"#9B5CF6", scam:"#FF6B35", phishing:"#FF6B35" };
-  // Sort by score descending so highest confidence flags appear first
   const sorted = [...flags].sort((a, b) => (b.score || 0) - (a.score || 0));
-  el.innerHTML = sorted.map(f => {
-    const severityLabel = f.severity ? `<span class="s-fr-severity s-sev-${f.severity}">${f.severity.toUpperCase()}</span>` : "";
+
+  el.innerHTML = sorted.map((f, i) => {
+    const typeClass = `s-type-${f.type || "unknown"}`;
+    const sevClass  = f.severity ? `s-sev-${f.severity}` : "";
+    const sevLabel  = f.severity ? f.severity.toUpperCase() : "";
+    const conf      = f.score ? `<div class="s-flag-conf">Confidence: ${Math.round(f.score*100)}%</div>` : "";
+    const source    = f.source === "gemini"
+      ? `<span style="font-size:8px;font-weight:800;color:#6366F1;margin-left:auto">⚡ Gemini</span>`
+      : "";
     return `
-    <div class="s-flag-row" style="border-left-color:${colorMap[f.type]||"#555"}">
-      <div class="s-fr-header">
-        <div class="s-fr-type">${esc(f.type.toUpperCase())}</div>
-        ${severityLabel}
-      </div>
-      <div class="s-fr-phrase">"${esc(f.phrase.slice(0,70))}${f.phrase.length>70?"…":""}"</div>
-      ${f.score ? `<div class="s-fr-conf">Confidence: ${Math.round(f.score*100)}%</div>` : ""}
-    </div>`;
+      <div class="s-flag-card" style="animation-delay:${i * 0.04}s">
+        <div class="s-flag-card-top">
+          <span class="s-flag-type-chip ${typeClass}">${esc(f.type.toUpperCase())}</span>
+          ${sevLabel ? `<span class="s-flag-sev ${sevClass}">${sevLabel}</span>` : ""}
+          ${source}
+        </div>
+        <div class="s-flag-phrase">"${esc(f.phrase.slice(0,70))}${f.phrase.length > 70 ? "…" : ""}"</div>
+        ${conf}
+      </div>`;
   }).join("");
 }
 
@@ -677,14 +1579,158 @@ function renderLinks(containerId) {
     .filter(a => !a.closest("#sentinel-root"))
     .map(a => ({ href: a.href, text: a.textContent.trim().slice(0,40) }))
     .filter(l => isSuspiciousLink(l.href)).slice(0, 8);
-  if (!links.length) { el.innerHTML = `<div class="s-no-flags">No suspicious links</div>`; return; }
+  const cntEl = document.getElementById("scam-link-count");
+  if (cntEl) cntEl.textContent = links.length;
+  if (!links.length) {
+    el.innerHTML = `<div class="s-no-flags"><div class="s-no-flags-emoji">🔗</div><div class="s-no-flags-text">No suspicious links found</div></div>`;
+    return;
+  }
   const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   el.innerHTML = links.map(l => `
-    <div class="s-flag-row" style="border-left-color:#FF6B35">
-      <div class="s-fr-type">SUSPICIOUS LINK</div>
-      <div class="s-fr-phrase">${esc(l.text || l.href.slice(0,50))}</div>
-      <div class="s-fr-conf">${esc(l.href.slice(0,60))}</div>
+    <div class="s-flag-card">
+      <div class="s-flag-card-top">
+        <span class="s-flag-type-chip s-type-phishing">SUSPICIOUS LINK</span>
+        <span class="s-flag-sev s-sev-high">HIGH</span>
+      </div>
+      <div class="s-flag-phrase">${esc(l.text || l.href.slice(0,50))}</div>
+      <div class="s-flag-conf">${esc(l.href.slice(0,60))}</div>
     </div>`).join("");
+}
+
+// ── Preferences ───────────────────────────────────────────────────────────────
+const DEFAULT_PREFS = {
+  sensitive_diet: false, sensitive_finance: false, sensitive_politics: false,
+  sensitive_addiction: false, sensitive_mental: false,
+  alert_threshold: "medium", dwell_tracking: true, behavior_tracking: true,
+};
+let userPrefs = { ...DEFAULT_PREFS };
+
+function loadPrefs() {
+  try { chrome.storage.local.get("sentinelPrefs", r => { if (r.sentinelPrefs) userPrefs = { ...DEFAULT_PREFS, ...r.sentinelPrefs }; }); }
+  catch { try { const s = localStorage.getItem("sentinelPrefs"); if (s) userPrefs = { ...DEFAULT_PREFS, ...JSON.parse(s) }; } catch {} }
+}
+function savePrefs() {
+  try { chrome.storage.local.set({ sentinelPrefs: userPrefs }); }
+  catch { try { localStorage.setItem("sentinelPrefs", JSON.stringify(userPrefs)); } catch {} }
+}
+
+function syncSettingsUI() {
+  const map = { "pref-diet":"sensitive_diet","pref-finance":"sensitive_finance","pref-politics":"sensitive_politics","pref-addiction":"sensitive_addiction","pref-mental":"sensitive_mental","pref-dwell":"dwell_tracking","pref-behavior":"behavior_tracking" };
+  Object.entries(map).forEach(([id,key]) => { const el = document.getElementById(id); if (el) el.checked = !!userPrefs[key]; });
+  const t = document.getElementById("pref-threshold"); if (t) t.value = userPrefs.alert_threshold || "medium";
+}
+function bindSettingsEvents() {
+  const map = { "pref-diet":"sensitive_diet","pref-finance":"sensitive_finance","pref-politics":"sensitive_politics","pref-addiction":"sensitive_addiction","pref-mental":"sensitive_mental","pref-dwell":"dwell_tracking","pref-behavior":"behavior_tracking" };
+  Object.entries(map).forEach(([id,key]) => { const el = document.getElementById(id); if (el) el.addEventListener("change", () => { userPrefs[key] = el.checked; savePrefs(); }); });
+  const t = document.getElementById("pref-threshold"); if (t) t.addEventListener("change", () => { userPrefs.alert_threshold = t.value; savePrefs(); });
+}
+
+// ── Behavior tracking ─────────────────────────────────────────────────────────
+let dwellStart = null, lastScrollY = window.scrollY, behaviorLog = [];
+const MAX_BEHAVIOR_LOG = 100;
+
+function loadBehaviorLog() {
+  try { chrome.storage.local.get("sentinelBehavior", r => { if (r.sentinelBehavior) behaviorLog = r.sentinelBehavior; }); }
+  catch { try { const s = localStorage.getItem("sentinelBehavior"); if (s) behaviorLog = JSON.parse(s); } catch {} }
+}
+function saveBehaviorLog() {
+  const t = behaviorLog.slice(-MAX_BEHAVIOR_LOG);
+  try { chrome.storage.local.set({ sentinelBehavior: t }); }
+  catch { try { localStorage.setItem("sentinelBehavior", JSON.stringify(t)); } catch {} }
+}
+
+function logBehaviorSignal(signal) {
+  if (!userPrefs.behavior_tracking) return;
+  behaviorLog.push({ ...signal, timestamp: Date.now(), url: location.href });
+  saveBehaviorLog();
+  postToDashboard({ type: "BEHAVIOR_SIGNAL", payload: signal });
+}
+
+function startDwellTracking(scanData, extracted) {
+  if (!userPrefs.dwell_tracking) return;
+  dwellStart = Date.now();
+  if ((scanData.overall_severity || "clean") === "clean") return;
+  setTimeout(() => {
+    if (!dwellStart) return;
+    const elapsed = (Date.now() - dwellStart) / 1000;
+    if (elapsed >= 7) logBehaviorSignal({ type:"dwell", signal:"prolonged_exposure", seconds:Math.round(elapsed), severity:scanData.overall_severity, contentTheme:extracted.theme||"unknown", platform:extracted.platform||"unknown", flags:(scanData.flags||[]).slice(0,3).map(f=>f.type) });
+  }, 8000);
+  window.addEventListener("beforeunload", () => {
+    if (!dwellStart) return;
+    const elapsed = (Date.now() - dwellStart) / 1000;
+    if (elapsed >= 3) logBehaviorSignal({ type:"dwell", signal:"page_exit", seconds:Math.round(elapsed), severity:scanData.overall_severity, contentTheme:extracted.theme||"unknown", platform:extracted.platform||"unknown" });
+    dwellStart = null;
+  }, { once: true });
+}
+
+let _scrollThrottle = null;
+window.addEventListener("scroll", () => {
+  if (!userPrefs.behavior_tracking) return;
+  clearTimeout(_scrollThrottle);
+  _scrollThrottle = setTimeout(() => {
+    const delta = Math.abs(window.scrollY - lastScrollY);
+    lastScrollY = window.scrollY;
+    if (delta > 600 && dwellStart) logBehaviorSignal({ type:"scroll", signal:"rapid_scroll_away", pixels:Math.round(delta), url:location.href });
+  }, 150);
+}, { passive: true });
+
+function applySensitivityFilter(scanData, extracted) {
+  const theme = (extracted.theme || "").toLowerCase();
+  let boost = false;
+  if (userPrefs.sensitive_diet     && theme.includes("fitness"))  boost = true;
+  if (userPrefs.sensitive_finance  && theme.includes("finance"))  boost = true;
+  if (userPrefs.sensitive_politics && theme.includes("politics")) boost = true;
+  if (userPrefs.sensitive_addiction && (theme.includes("gambling") || theme.includes("alcohol"))) boost = true;
+  if (userPrefs.sensitive_mental   && theme.includes("mental"))   boost = true;
+  if (boost) {
+    const top = Math.max(scanData.toxicity||0, scanData.misinfo||0, scanData.scam_score||0, scanData.manipulation||0);
+    if (top > 0.15 && scanData.overall_severity === "clean")  return { ...scanData, overall_severity:"low",    _sensitivity_boosted:true };
+    if (top > 0.25 && scanData.overall_severity === "low")    return { ...scanData, overall_severity:"medium", _sensitivity_boosted:true };
+  }
+  return scanData;
+}
+
+// ── Reaction button ───────────────────────────────────────────────────────────
+function injectReactionButton(containerId, scanData, extracted) {
+  const container = document.getElementById(containerId);
+  if (!container || container.querySelector(".s-reaction-row")) return;
+  const row = document.createElement("div");
+  row.className = "s-reaction-row";
+  row.innerHTML = `
+    <span class="s-reaction-label">HOW'D THIS MAKE YOU FEEL?</span>
+    <button class="s-react-emoji" data-reaction="upset"   title="Upset me">😟</button>
+    <button class="s-react-emoji" data-reaction="anxious" title="Anxious">😰</button>
+    <button class="s-react-emoji" data-reaction="angry"   title="Angry">😡</button>
+    <button class="s-react-emoji" data-reaction="fine"    title="Fine">😌</button>
+  `;
+  row.querySelectorAll(".s-react-emoji").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const reaction = btn.dataset.reaction;
+      logBehaviorSignal({ type:"reaction", signal:"explicit_reaction", reaction, severity:scanData.overall_severity||"unknown", contentTheme:extracted.theme||"unknown", platform:extracted.platform||"unknown", flagTypes:[...new Set((scanData.flags||[]).map(f=>f.type))] });
+      incrementStat("reactions");
+      row.querySelectorAll(".s-react-emoji").forEach(b => { b.style.opacity="0.2"; b.disabled=true; });
+      btn.style.opacity="1"; btn.style.transform="scale(1.4)";
+      const thanks = document.createElement("span");
+      thanks.className = "s-react-thanks"; thanks.textContent = "Noted ✓";
+      row.appendChild(thanks);
+      if (["upset","anxious","angry"].includes(reaction) && extracted.theme) showSensitivityHint(extracted.theme);
+    });
+  });
+  container.appendChild(row);
+}
+
+function showSensitivityHint(theme) {
+  const themeToKey = { "fitness / diet":"sensitive_diet","finance / crypto":"sensitive_finance","politics / news":"sensitive_politics","gambling":"sensitive_addiction","nightlife / alcohol":"sensitive_addiction","mental health / wellness":"sensitive_mental" };
+  const prefKey = themeToKey[theme];
+  if (!prefKey || userPrefs[prefKey]) return;
+  const hint = document.createElement("div");
+  hint.style.cssText = "position:fixed;bottom:100px;left:28px;z-index:99999;background:#fff;color:#1E1B4B;font-size:11px;padding:14px 16px;border-radius:14px;border:1.5px solid #DDD6FE;max-width:260px;font-family:'Nunito',sans-serif;box-shadow:0 8px 30px rgba(99,102,241,0.18);animation:s-slide-in 0.3s ease;";
+  const label = theme.split("/")[0].trim();
+  hint.innerHTML = `<div style="font-weight:900;margin-bottom:6px;font-size:13px">💡 Sensitivity tip</div><div style="color:#6B7280;line-height:1.5">You seem affected by <strong style="color:#1E1B4B">${label}</strong> content. Enable enhanced sensitivity to get earlier warnings.</div><div style="display:flex;gap:8px;margin-top:10px"><button id="s-hint-enable" style="background:#6366F1;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif">Enable</button><button id="s-hint-dismiss" style="background:none;color:#9CA3AF;border:1.5px solid #E5E7EB;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif">Dismiss</button></div>`;
+  document.body.appendChild(hint);
+  hint.querySelector("#s-hint-enable").addEventListener("click", () => { userPrefs[prefKey]=true; savePrefs(); syncSettingsUI(); hint.remove(); });
+  hint.querySelector("#s-hint-dismiss").addEventListener("click", () => hint.remove());
+  setTimeout(() => hint.remove(), 12000);
 }
 
 function isSuspiciousLink(href) {
@@ -803,9 +1849,16 @@ function clearHighlights() {
 }
 
 function setStatus(mode, msg) {
-  const map = { toxicity:"tox-status", misinfo:"mis-status", scam:"scam-status" };
-  const el = document.getElementById(map[mode]);
+  const map = { toxicity: ["tox-status","tox-dot"], misinfo: ["mis-status","mis-dot"], scam: ["scam-status","scam-dot"] };
+  const [statusId, dotId] = map[mode] || [];
+  const el  = document.getElementById(statusId);
+  const dot = document.getElementById(dotId);
   if (el) el.textContent = msg;
+  if (dot) {
+    const isScanning = msg.includes("Scanning");
+    const hasFlags   = msg.includes("flag");
+    dot.className = "s-status-dot" + (isScanning ? " s-dot-active" : hasFlags ? " s-dot-warn" : "");
+  }
 }
 
 // ── Image detection ───────────────────────────────────────────────────────────
@@ -906,5 +1959,27 @@ const observer = new MutationObserver(() => {
   debounceTimer = setTimeout(() => runScan(activeMode), DEBOUNCE_MS);
 });
 
+// ── SPA URL change watcher ────────────────────────────────────────────────────
+// Resets creator scan state when navigating to a new post (YouTube, TikTok, IG)
+let _lastHref = location.href;
+const urlWatcher = new MutationObserver(() => {
+  if (location.href !== _lastHref) {
+    _lastHref = location.href;
+    creatorScanDone = false;
+    document.getElementById("sentinel-creator-banner")?.remove();
+    creatorBannerEl = null;
+    // Re-run creator scan after DOM settles on new page
+    setTimeout(() => {
+      const extracted = extractText();
+      if (extracted.platform && extracted.platform !== "unknown") {
+        runCreatorScan(extracted).catch(() => {});
+      }
+    }, 2000);
+  }
+});
+urlWatcher.observe(document.body, { childList: true, subtree: true });
+
+loadPrefs();
+loadBehaviorLog();
 injectUI();
 observer.observe(document.body, { childList: true, subtree: true });
