@@ -640,94 +640,124 @@ function extractText() {
 // ── UI INJECTION ──────────────────────────────────────────────────────────────
 function injectUI() {
   if (document.getElementById("sentinel-root")) return;
+
+  // ── Lucide icon SVGs (inline, no external dependency) ────────────────────
+  const IC = {
+    shield:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+    check:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+    x:        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+    chevLeft: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`,
+    chevRight:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`,
+    alertTri: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+    eye:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`,
+    search:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
+    lock:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>`,
+    scan:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>`,
+    settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>`,
+    play:     `<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>`,
+    trash:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>`,
+    image:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
+    type:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>`,
+    info:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
+    frown:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 16s-1.5-2-4-2-4 2-4 2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>`,
+    meh:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="15" x2="16" y2="15"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>`,
+    smile:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 13s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>`,
+    activity: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
+    zap:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+    sparks:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z"/></svg>`,
+    link:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>`,
+    dashboard:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`,
+    thumbUp:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3H14z"/><path d="M7 22H4a2 2 0 01-2-2v-7a2 2 0 012-2h3"/></svg>`,
+    bell:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>`,
+    dollar:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>`,
+    cpu:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>`,
+    clock:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+    mouse:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="7"/><line x1="12" y1="6" x2="12" y2="10"/></svg>`,
+    salad:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 21h10"/><path d="M12 21a9 9 0 009-9H3a9 9 0 009 9z"/><path d="M11.38 12a2.4 2.4 0 01-.4-4.77 2.4 2.4 0 013.2-3.19 2.4 2.4 0 013.47-.63 2.4 2.4 0 013.37 3.37 2.4 2.4 0 01-1.1 3.7 2.51 2.51 0 01.03 1.1"/><line x1="13" y1="12" x2="13.01" y2="12"/></svg>`,
+    brain:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 017 4.5v0A2.5 2.5 0 014.5 7v0A2.5 2.5 0 012 9.5v5A2.5 2.5 0 004.5 17v0A2.5 2.5 0 007 19.5v0A2.5 2.5 0 009.5 22h5a2.5 2.5 0 002.5-2.5v0A2.5 2.5 0 0019.5 17v0A2.5 2.5 0 0022 14.5v-5A2.5 2.5 0 0019.5 7v0A2.5 2.5 0 0017 4.5v0A2.5 2.5 0 0014.5 2z"/></svg>`,
+    vote:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>`,
+    dice:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><circle cx="8" cy="8" r="1" fill="currentColor"/><circle cx="16" cy="8" r="1" fill="currentColor"/><circle cx="8" cy="16" r="1" fill="currentColor"/><circle cx="16" cy="16" r="1" fill="currentColor"/></svg>`,
+    chart:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
+  };
+
   const root = document.createElement("div");
   root.id = "sentinel-root";
   root.innerHTML = `
 
-    <!-- ── Floating bubble ── -->
-    <div id="s-bubble" title="Open Sentinel">
+    <!-- Toast container -->
+    <div id="s-toast-container"></div>
+
+    <!-- Floating bubble -->
+    <div id="s-bubble" title="Sentinel">
       <div id="s-bubble-dot"></div>
-      <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M14 3L24 7.5V14C24 19.25 19.6 24.1 14 25.5C8.4 24.1 4 19.25 4 14V7.5L14 3Z" fill="rgba(255,255,255,0.3)" stroke="white" stroke-width="1.8" stroke-linejoin="round"/>
-        <path d="M10 14l2.5 2.5L18 11" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
+      ${IC.shield}
     </div>
 
-    <!-- ── Main panel ── -->
+    <!-- Main panel -->
     <div id="s-panel" class="s-closed">
 
-      <!-- HOME SCREEN -->
+      <!-- HOME -->
       <div id="s-home" class="s-screen s-active">
         <div class="s-home-header">
           <div class="s-logo-lockup">
-            <div class="s-logo-badge">
-              <svg viewBox="0 0 28 28" fill="none"><path d="M14 3L24 7.5V14C24 19.25 19.6 24.1 14 25.5C8.4 24.1 4 19.25 4 14V7.5L14 3Z" fill="rgba(255,255,255,0.35)" stroke="white" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 14l2.5 2.5L18 11" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
+            <div class="s-logo-badge">${IC.shield}</div>
             <div>
               <div class="s-brand-name">Sentinel</div>
-              <span class="s-brand-tag">YOUR SAFETY COMPANION</span>
+              <div class="s-brand-tag">YOUR SAFETY COMPANION</div>
             </div>
           </div>
           <div class="s-header-actions">
-            <button class="s-dash-btn" id="s-open-dash">⬡ Dashboard</button>
-            <button class="s-icon-btn" id="s-close" title="Close">✕</button>
+            <button class="s-dash-btn" id="s-open-dash">${IC.dashboard} Dashboard</button>
+            <button class="s-icon-btn" id="s-close">${IC.x}</button>
           </div>
         </div>
 
-        <!-- Hero card -->
-        <div class="s-hero">
-          <div class="s-hero-greeting">👋 Hey there!</div>
-          <div class="s-hero-title">What would you like me to check?</div>
-          <div class="s-hero-sub">I'll scan this page and flag anything that looks off — in real time.</div>
-          <div class="s-hero-stats">
-            <div class="s-hero-stat">
-              <div class="s-hero-stat-val" id="home-scans-today">0</div>
-              <div class="s-hero-stat-lbl">SCANS TODAY</div>
-            </div>
-            <div class="s-hero-stat">
-              <div class="s-hero-stat-val" id="home-flags-total">0</div>
-              <div class="s-hero-stat-lbl">FLAGS CAUGHT</div>
-            </div>
-            <div class="s-hero-stat">
-              <div class="s-hero-stat-val" id="home-streak">🔥 0</div>
-              <div class="s-hero-stat-lbl">DAY STREAK</div>
-            </div>
+        <div class="s-stats-bar">
+          <div class="s-stat-item">
+            <div class="s-stat-val" id="home-scans-today">0</div>
+            <div class="s-stat-lbl">Scans</div>
+          </div>
+          <div class="s-stat-item">
+            <div class="s-stat-val" id="home-flags-total">0</div>
+            <div class="s-stat-lbl">Flags</div>
+          </div>
+          <div class="s-stat-item">
+            <div class="s-stat-val" id="home-reactions">0</div>
+            <div class="s-stat-lbl">Reactions</div>
           </div>
         </div>
 
-        <div class="s-section-label">CHOOSE A SCAN MODE</div>
+        <div class="s-section-label">Scan Mode</div>
 
         <div class="s-mode-grid">
           <button class="s-mode-card s-mode-tox" data-mode="toxicity">
-            <div class="s-mode-emoji-wrap">🛑</div>
+            <div class="s-mode-icon-wrap">${IC.alertTri}</div>
             <div class="s-mode-info">
               <div class="s-mode-name">Toxicity Check</div>
               <div class="s-mode-desc">Cyberbullying · Hate speech · Harassment</div>
             </div>
-            <div class="s-mode-pill">NEW</div>
+            <div class="s-mode-arrow">${IC.chevRight}</div>
           </button>
           <button class="s-mode-card s-mode-mis" data-mode="misinfo">
-            <div class="s-mode-emoji-wrap">🔍</div>
+            <div class="s-mode-icon-wrap">${IC.search}</div>
             <div class="s-mode-info">
               <div class="s-mode-name">Fact Check</div>
               <div class="s-mode-desc">Misinformation · Manipulation · AI text</div>
             </div>
-            <div class="s-mode-pill">AI</div>
+            <div class="s-mode-arrow">${IC.chevRight}</div>
           </button>
           <button class="s-mode-card s-mode-scam" data-mode="scam">
-            <div class="s-mode-emoji-wrap">🔐</div>
+            <div class="s-mode-icon-wrap">${IC.lock}</div>
             <div class="s-mode-info">
               <div class="s-mode-name">Scam Shield</div>
               <div class="s-mode-desc">Phishing · Fraud · Malicious links</div>
             </div>
-            <div class="s-mode-pill">LIVE</div>
+            <div class="s-mode-arrow">${IC.chevRight}</div>
           </button>
         </div>
 
-        <div class="s-settings-row">
-          <button class="s-settings-btn" id="s-open-settings">
-            ⚙️ Sensitivity settings
-          </button>
+        <div class="s-bottom-row">
+          <button class="s-settings-btn" id="s-open-settings">${IC.settings} Sensitivity settings</button>
           <div class="s-version-tag">v8.0</div>
         </div>
       </div>
@@ -735,16 +765,16 @@ function injectUI() {
       <!-- TOXICITY SCREEN -->
       <div id="s-screen-toxicity" class="s-screen s-scan-screen">
         <div class="s-scan-header">
-          <button class="s-back-btn" data-back="toxicity">← Back</button>
-          <div class="s-screen-chip s-chip-tox">🛑 Toxicity</div>
-          <button class="s-close-btn" id="s-close-tox">✕</button>
+          <button class="s-back-btn" data-back="toxicity">${IC.chevLeft} Back</button>
+          <div class="s-screen-label">${IC.alertTri} Toxicity Check</div>
+          <button class="s-close-btn" id="s-close-tox">${IC.x}</button>
         </div>
-        <div class="s-score-card" id="tox-score-card">
+        <div class="s-score-card">
           <div class="s-score-ring-wrap">
-            <svg width="72" height="72" viewBox="0 0 72 72">
-              <circle class="s-score-ring-bg" cx="36" cy="36" r="30"/>
-              <circle class="s-score-ring-fg" id="tox-ring" cx="36" cy="36" r="30"
-                stroke="#F43F5E" stroke-dasharray="188.5" stroke-dashoffset="188.5"/>
+            <svg width="68" height="68" viewBox="0 0 68 68">
+              <circle class="s-score-ring-bg" cx="34" cy="34" r="28"/>
+              <circle class="s-score-ring-fg" id="tox-ring" cx="34" cy="34" r="28"
+                stroke="#DC2626" stroke-dasharray="175.9" stroke-dashoffset="175.9"/>
             </svg>
             <div class="s-score-inner">
               <div class="s-score-num" id="tox-pct">0%</div>
@@ -753,15 +783,15 @@ function injectUI() {
           </div>
           <div class="s-score-info">
             <div class="s-score-verdict" id="tox-verdict">Ready to scan</div>
-            <div class="s-score-detail" id="tox-detail">Hit scan to check this page for toxic content, hate speech, and cyberbullying.</div>
+            <div class="s-score-detail" id="tox-detail">Scan this page for toxic content, hate speech, and cyberbullying.</div>
           </div>
         </div>
         <div class="s-actions">
-          <button class="s-scan-btn s-btn-tox" id="tox-scan">▶ Scan Page</button>
-          <button class="s-clear-btn" id="tox-clear">Clear</button>
+          <button class="s-scan-btn s-btn-tox" id="tox-scan">${IC.play} Scan Page</button>
+          <button class="s-clear-btn" id="tox-clear">${IC.x} Clear</button>
         </div>
-        <div class="s-analysis-box" id="tox-writeup">
-          <div class="s-analysis-label">Gemini Analysis</div>
+        <div class="s-analysis-box">
+          <div class="s-analysis-label">${IC.zap} Gemini Analysis</div>
           <div class="s-analysis-text" id="tox-writeup-text">Run a scan to see the AI analysis.</div>
         </div>
         <div class="s-flags-section">
@@ -770,10 +800,7 @@ function injectUI() {
             <div class="s-flags-count" id="tox-flag-count">0</div>
           </div>
           <div class="s-flags-list" id="tox-flags">
-            <div class="s-no-flags">
-              <div class="s-no-flags-emoji">✨</div>
-              <div class="s-no-flags-text">Nothing flagged yet</div>
-            </div>
+            <div class="s-no-flags">${IC.check} Nothing flagged yet</div>
           </div>
         </div>
         <div class="s-status">
@@ -785,16 +812,16 @@ function injectUI() {
       <!-- MISINFO SCREEN -->
       <div id="s-screen-misinfo" class="s-screen s-scan-screen">
         <div class="s-scan-header">
-          <button class="s-back-btn" data-back="misinfo">← Back</button>
-          <div class="s-screen-chip s-chip-mis">🔍 Fact Check</div>
-          <button class="s-close-btn" id="s-close-mis">✕</button>
+          <button class="s-back-btn" data-back="misinfo">${IC.chevLeft} Back</button>
+          <div class="s-screen-label">${IC.search} Fact Check</div>
+          <button class="s-close-btn" id="s-close-mis">${IC.x}</button>
         </div>
         <div class="s-score-card">
           <div class="s-score-ring-wrap">
-            <svg width="72" height="72" viewBox="0 0 72 72">
-              <circle class="s-score-ring-bg" cx="36" cy="36" r="30"/>
-              <circle class="s-score-ring-fg" id="mis-ring" cx="36" cy="36" r="30"
-                stroke="#F59E0B" stroke-dasharray="188.5" stroke-dashoffset="188.5"/>
+            <svg width="68" height="68" viewBox="0 0 68 68">
+              <circle class="s-score-ring-bg" cx="34" cy="34" r="28"/>
+              <circle class="s-score-ring-fg" id="mis-ring" cx="34" cy="34" r="28"
+                stroke="#D97706" stroke-dasharray="175.9" stroke-dashoffset="175.9"/>
             </svg>
             <div class="s-score-inner">
               <div class="s-score-num" id="mis-pct">0%</div>
@@ -803,24 +830,28 @@ function injectUI() {
           </div>
           <div class="s-score-info">
             <div class="s-score-verdict" id="mis-verdict">Ready to scan</div>
-            <div class="s-score-detail" id="mis-detail">I'll check for misinformation, manipulation tactics, and AI-generated text.</div>
+            <div class="s-score-detail" id="mis-detail">Check for misinformation, manipulation tactics, and AI-generated text.</div>
           </div>
         </div>
         <div class="s-toggles-box">
           <div class="s-toggle-row">
-            <div class="s-toggle-icon">🖼️</div>
-            <div class="s-toggle-name">AI Image Detection<div class="s-toggle-hint">Hover over any image</div></div>
+            <div class="s-toggle-icon">${IC.image}</div>
+            <div class="s-toggle-name">AI Image Detection
+              <span class="s-toggle-hint">Hover over any image on the page</span>
+            </div>
             <label class="s-toggle"><input type="checkbox" id="img-detect-toggle"><div class="s-toggle-track"></div></label>
           </div>
           <div class="s-toggle-row">
-            <div class="s-toggle-icon">✍️</div>
-            <div class="s-toggle-name">AI Text Checker<div class="s-toggle-hint">Highlight any text</div></div>
+            <div class="s-toggle-icon">${IC.type}</div>
+            <div class="s-toggle-name">AI Text Detector
+              <span class="s-toggle-hint">Highlight any text to analyze</span>
+            </div>
             <label class="s-toggle"><input type="checkbox" id="text-ai-toggle"><div class="s-toggle-track"></div></label>
           </div>
         </div>
         <div class="s-bars-box">
           <div class="s-bar-row">
-            <div class="s-bar-label">Misinfo</div>
+            <div class="s-bar-label">Misinformation</div>
             <div class="s-bar-track"><div class="s-bar-fill s-fill-mis" id="mis-bar"></div></div>
             <div class="s-bar-pct" id="mis-bar-pct">—</div>
           </div>
@@ -831,8 +862,8 @@ function injectUI() {
           </div>
         </div>
         <div class="s-actions">
-          <button class="s-scan-btn s-btn-mis" id="mis-scan">▶ Scan Page</button>
-          <button class="s-clear-btn" id="mis-clear">Clear</button>
+          <button class="s-scan-btn s-btn-mis" id="mis-scan">${IC.play} Scan Page</button>
+          <button class="s-clear-btn" id="mis-clear">${IC.x} Clear</button>
         </div>
         <div class="s-ai-result-box" id="ai-text-result">
           <div class="s-ai-result-label">Selected Text — AI Analysis</div>
@@ -841,9 +872,10 @@ function injectUI() {
             <div class="s-ai-pct" id="ai-text-pct">—</div>
           </div>
           <div class="s-ai-verdict" id="ai-text-verdict"></div>
+          <div class="s-ai-signals" id="ai-text-signals"></div>
         </div>
-        <div class="s-analysis-box" id="mis-writeup">
-          <div class="s-analysis-label">Gemini Analysis</div>
+        <div class="s-analysis-box">
+          <div class="s-analysis-label">${IC.zap} Gemini Analysis</div>
           <div class="s-analysis-text" id="mis-writeup-text">Run a scan to see the AI analysis.</div>
         </div>
         <div class="s-flags-section">
@@ -852,10 +884,7 @@ function injectUI() {
             <div class="s-flags-count" id="mis-flag-count">0</div>
           </div>
           <div class="s-flags-list" id="mis-flags">
-            <div class="s-no-flags">
-              <div class="s-no-flags-emoji">✨</div>
-              <div class="s-no-flags-text">Nothing flagged yet</div>
-            </div>
+            <div class="s-no-flags">${IC.check} Nothing flagged yet</div>
           </div>
         </div>
         <div class="s-status">
@@ -867,9 +896,9 @@ function injectUI() {
       <!-- SCAM SCREEN -->
       <div id="s-screen-scam" class="s-screen s-scan-screen">
         <div class="s-scan-header">
-          <button class="s-back-btn" data-back="scam">← Back</button>
-          <div class="s-screen-chip s-chip-scam">🔐 Scam Shield</div>
-          <button class="s-close-btn" id="s-close-scam">✕</button>
+          <button class="s-back-btn" data-back="scam">${IC.chevLeft} Back</button>
+          <div class="s-screen-label">${IC.lock} Scam Shield</div>
+          <button class="s-close-btn" id="s-close-scam">${IC.x}</button>
         </div>
         <div class="s-url-box">
           <div class="s-url-label">Current Page</div>
@@ -894,11 +923,11 @@ function injectUI() {
           </div>
         </div>
         <div class="s-actions">
-          <button class="s-scan-btn s-btn-scam" id="scam-scan">▶ Scan Page</button>
-          <button class="s-clear-btn" id="scam-clear">Clear</button>
+          <button class="s-scan-btn s-btn-scam" id="scam-scan">${IC.play} Scan Page</button>
+          <button class="s-clear-btn" id="scam-clear">${IC.x} Clear</button>
         </div>
-        <div class="s-analysis-box" id="scam-writeup">
-          <div class="s-analysis-label">Gemini Threat Analysis</div>
+        <div class="s-analysis-box">
+          <div class="s-analysis-label">${IC.zap} Gemini Threat Analysis</div>
           <div class="s-analysis-text" id="scam-writeup-text">Run a scan to detect threats.</div>
         </div>
         <div class="s-flags-section">
@@ -907,20 +936,14 @@ function injectUI() {
             <div class="s-flags-count" id="scam-link-count">0</div>
           </div>
           <div class="s-flags-list" id="scam-links">
-            <div class="s-no-flags">
-              <div class="s-no-flags-emoji">🔗</div>
-              <div class="s-no-flags-text">No suspicious links found</div>
-            </div>
+            <div class="s-no-flags">${IC.link} No suspicious links found</div>
           </div>
           <div class="s-flags-header" style="margin-top:10px">
             <div class="s-flags-title">Flagged Content</div>
             <div class="s-flags-count" id="scam-flag-count">0</div>
           </div>
           <div class="s-flags-list" id="scam-flags">
-            <div class="s-no-flags">
-              <div class="s-no-flags-emoji">✨</div>
-              <div class="s-no-flags-text">Nothing flagged yet</div>
-            </div>
+            <div class="s-no-flags">${IC.check} Nothing flagged yet</div>
           </div>
         </div>
         <div class="s-status">
@@ -932,63 +955,63 @@ function injectUI() {
       <!-- SETTINGS SCREEN -->
       <div id="s-screen-settings" class="s-screen">
         <div class="s-settings-header">
-          <button class="s-back-btn" id="s-settings-back">← Back</button>
-          <div class="s-settings-title">⚙️ My Preferences</div>
-          <button class="s-close-btn" id="s-close-settings">✕</button>
+          <button class="s-back-btn" id="s-settings-back">${IC.chevLeft} Back</button>
+          <div class="s-settings-title">Preferences</div>
+          <button class="s-close-btn" id="s-close-settings">${IC.x}</button>
         </div>
         <div class="s-settings-body">
 
           <div class="s-settings-group">
-            <div class="s-settings-group-title">🎯 Sensitivity — I'm extra careful about</div>
+            <div class="s-settings-group-title">Sensitivity — flag earlier for</div>
             <div class="s-pref-row">
-              <div class="s-pref-emoji">🥗</div>
+              <div class="s-pref-icon">${IC.salad}</div>
               <div class="s-pref-info">
                 <div class="s-pref-name">Diet & Fitness Content</div>
-                <div class="s-pref-hint">Flags extreme diet/workout advice earlier</div>
+                <div class="s-pref-hint">Flag extreme diet/workout advice sooner</div>
               </div>
               <label class="s-toggle"><input type="checkbox" id="pref-diet"><div class="s-toggle-track"></div></label>
             </div>
             <div class="s-pref-row">
-              <div class="s-pref-emoji">💸</div>
+              <div class="s-pref-icon">${IC.dollar}</div>
               <div class="s-pref-info">
-                <div class="s-pref-name">Financial & Crypto Content</div>
+                <div class="s-pref-name">Financial & Crypto</div>
                 <div class="s-pref-hint">Lower threshold for get-rich-quick signals</div>
               </div>
               <label class="s-toggle"><input type="checkbox" id="pref-finance"><div class="s-toggle-track"></div></label>
             </div>
             <div class="s-pref-row">
-              <div class="s-pref-emoji">🗳️</div>
+              <div class="s-pref-icon">${IC.vote}</div>
               <div class="s-pref-info">
                 <div class="s-pref-name">Political Content</div>
-                <div class="s-pref-hint">Heightened misinfo detection on political topics</div>
+                <div class="s-pref-hint">Heightened misinfo detection on politics</div>
               </div>
               <label class="s-toggle"><input type="checkbox" id="pref-politics"><div class="s-toggle-track"></div></label>
             </div>
             <div class="s-pref-row">
-              <div class="s-pref-emoji">🎰</div>
+              <div class="s-pref-icon">${IC.dice}</div>
               <div class="s-pref-info">
                 <div class="s-pref-name">Gambling & Substances</div>
-                <div class="s-pref-hint">Flags addiction-promoting content</div>
+                <div class="s-pref-hint">Flag addiction-promoting content</div>
               </div>
               <label class="s-toggle"><input type="checkbox" id="pref-addiction"><div class="s-toggle-track"></div></label>
             </div>
             <div class="s-pref-row">
-              <div class="s-pref-emoji">🧠</div>
+              <div class="s-pref-icon">${IC.brain}</div>
               <div class="s-pref-info">
                 <div class="s-pref-name">Mental Health Content</div>
-                <div class="s-pref-hint">Alert on self-esteem attacks & doomscrolling bait</div>
+                <div class="s-pref-hint">Alert on self-esteem attacks & doom bait</div>
               </div>
               <label class="s-toggle"><input type="checkbox" id="pref-mental"><div class="s-toggle-track"></div></label>
             </div>
           </div>
 
           <div class="s-settings-group">
-            <div class="s-settings-group-title">🔔 Alert Threshold</div>
+            <div class="s-settings-group-title">Alert Threshold</div>
             <div class="s-pref-row">
-              <div class="s-pref-emoji">📊</div>
+              <div class="s-pref-icon">${IC.bell}</div>
               <div class="s-pref-info">
                 <div class="s-pref-name">Show warnings at</div>
-                <div class="s-pref-hint">How sensitive should alerts be?</div>
+                <div class="s-pref-hint">Minimum risk level to trigger alerts</div>
               </div>
               <select class="s-threshold-select" id="pref-threshold">
                 <option value="low">Low risk</option>
@@ -999,9 +1022,9 @@ function injectUI() {
           </div>
 
           <div class="s-settings-group">
-            <div class="s-settings-group-title">📈 Behavior Tracking</div>
+            <div class="s-settings-group-title">Behavior Tracking</div>
             <div class="s-pref-row">
-              <div class="s-pref-emoji">⏱️</div>
+              <div class="s-pref-icon">${IC.clock}</div>
               <div class="s-pref-info">
                 <div class="s-pref-name">Dwell Time Tracking</div>
                 <div class="s-pref-hint">Logs time spent on flagged pages</div>
@@ -1009,36 +1032,36 @@ function injectUI() {
               <label class="s-toggle"><input type="checkbox" id="pref-dwell" checked><div class="s-toggle-track"></div></label>
             </div>
             <div class="s-pref-row">
-              <div class="s-pref-emoji">🖱️</div>
+              <div class="s-pref-icon">${IC.mouse}</div>
               <div class="s-pref-info">
                 <div class="s-pref-name">Scroll Behavior</div>
-                <div class="s-pref-hint">Detects rapid scroll-away from content</div>
+                <div class="s-pref-hint">Detect rapid scroll-away from content</div>
               </div>
               <label class="s-toggle"><input type="checkbox" id="pref-behavior" checked><div class="s-toggle-track"></div></label>
             </div>
           </div>
 
           <div class="s-stats-box">
-            <div class="s-stats-title">📊 My Sentinel Stats</div>
+            <div class="s-stats-title">Session Stats</div>
             <div class="s-stats-grid">
               <div class="s-stat-chip">
-                <div class="s-stat-val" id="stat-scans">0</div>
-                <div class="s-stat-lbl">Total Scans</div>
+                <div class="s-stat-chip-val" id="stat-scans">0</div>
+                <div class="s-stat-chip-lbl">Total Scans</div>
               </div>
               <div class="s-stat-chip">
-                <div class="s-stat-val" id="stat-flags">0</div>
-                <div class="s-stat-lbl">Flags Caught</div>
+                <div class="s-stat-chip-val" id="stat-flags">0</div>
+                <div class="s-stat-chip-lbl">Flags Caught</div>
               </div>
               <div class="s-stat-chip">
-                <div class="s-stat-val" id="stat-reactions">0</div>
-                <div class="s-stat-lbl">Reactions Logged</div>
+                <div class="s-stat-chip-val" id="stat-reactions">0</div>
+                <div class="s-stat-chip-lbl">Reactions</div>
               </div>
               <div class="s-stat-chip">
-                <div class="s-stat-val" id="stat-creators">0</div>
-                <div class="s-stat-lbl">Creators Scanned</div>
+                <div class="s-stat-chip-val" id="stat-creators">0</div>
+                <div class="s-stat-chip-lbl">Creators</div>
               </div>
             </div>
-            <button class="s-clear-data-btn" id="s-clear-data">🗑️ Clear My Data</button>
+            <button class="s-clear-data-btn" id="s-clear-data">${IC.trash} Clear My Data</button>
           </div>
         </div>
       </div>
@@ -1047,17 +1070,18 @@ function injectUI() {
 
     <!-- Image hover tooltip -->
     <div id="s-img-tooltip" style="display:none">
-      <div class="s-img-tip-header">🖼️ AI Image Analysis</div>
+      <div class="s-img-tip-header">${IC.image} AI Image Analysis</div>
       <div class="s-img-tip-track"><div class="s-img-tip-bar" id="img-tip-bar"></div></div>
       <div class="s-img-tip-verdict" id="img-tip-verdict">Analyzing…</div>
       <div class="s-img-tip-signals" id="img-tip-signals"></div>
     </div>
   `;
+
   document.body.appendChild(root);
 
-  // ── Wire events ────────────────────────────────────────────────────────────
+  // ── Wire events ─────────────────────────────────────────────────────────
   document.getElementById("s-bubble").addEventListener("click", toggleSidebar);
-  document.querySelectorAll(".s-close-btn").forEach(b => b.addEventListener("click", closeSidebar));
+  document.querySelectorAll(".s-close-btn, #s-close").forEach(b => b.addEventListener("click", closeSidebar));
   document.querySelectorAll(".s-mode-card").forEach(b => b.addEventListener("click", () => goMode(b.dataset.mode)));
   document.querySelectorAll(".s-back-btn[data-back]").forEach(b => b.addEventListener("click", goHome));
   document.getElementById("s-open-settings").addEventListener("click", goSettings);
@@ -1069,10 +1093,10 @@ function injectUI() {
   document.getElementById("scam-scan").addEventListener("click", () => runScan("scam"));
   document.getElementById("scam-clear").addEventListener("click", clearHighlights);
   document.getElementById("img-detect-toggle").addEventListener("change", e => { imageDetectOn = e.target.checked; toggleImageDetect(imageDetectOn); });
-  document.getElementById("text-ai-toggle").addEventListener("change", e => { textAiOn = e.target.checked; toggleTextAi(textAiOn); });
+  document.getElementById("text-ai-toggle").addEventListener("change",   e => { textAiOn = e.target.checked; toggleTextAi(textAiOn); });
   document.getElementById("s-open-dash").addEventListener("click", () => window.open(DASHBOARD_URL, "sentinel-dashboard"));
   document.getElementById("s-clear-data").addEventListener("click", () => {
-    if (confirm("Clear all Sentinel data? This can't be undone.")) {
+    if (confirm("Clear all Sentinel data?")) {
       behaviorLog = []; saveBehaviorLog();
       try { chrome.storage.local.remove(["sentinelStats"]); } catch {}
       updateStats();
@@ -1139,14 +1163,13 @@ function incrementStat(key, amount = 1) {
 
 function updateStats() {
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  set("home-scans-today", sessionStats.scans || 0);
-  set("home-flags-total", sessionStats.flags || 0);
-  set("home-streak", `🔥 ${sessionStats.streak || 1}`);
-  set("stat-scans",     sessionStats.scans     || 0);
-  set("stat-flags",     sessionStats.flags     || 0);
-  set("stat-reactions", sessionStats.reactions  || 0);
-  set("stat-creators",  sessionStats.creators   || 0);
-  // Show notification dot if flags found today
+  set("home-scans-today", sessionStats.scans     || 0);
+  set("home-flags-total", sessionStats.flags     || 0);
+  set("home-reactions",   sessionStats.reactions || 0);
+  set("stat-scans",       sessionStats.scans     || 0);
+  set("stat-flags",       sessionStats.flags     || 0);
+  set("stat-reactions",   sessionStats.reactions || 0);
+  set("stat-creators",    sessionStats.creators  || 0);
   const dot = document.getElementById("s-bubble-dot");
   if (dot) dot.classList.toggle("visible", (sessionStats.flags || 0) > 0);
 }
@@ -1231,6 +1254,9 @@ async function runScan(mode) {
     // Track stats
     incrementStat("scans");
     if (count > 0) incrementStat("flags", count);
+
+    // Fire toast notification for medium/high severity
+    maybeToastScanResult(data, mode);
 
     // Inject reaction buttons into the active scan panel
     const panelFlagsId = mode === "toxicity" ? "tox-flags" : mode === "misinfo" ? "mis-flags" : "scam-flags";
@@ -1736,35 +1762,122 @@ function hideImgTooltip() { const t = document.getElementById("s-img-tooltip"); 
 async function analyzeImage(img) {
   const tip = document.getElementById("s-img-tooltip");
   if (!tip) return;
-  document.getElementById("img-tip-verdict").textContent = "Analyzing…";
-  document.getElementById("img-tip-bar").style.width = "20%";
-  document.getElementById("img-tip-bar").style.background = "#333";
-  document.getElementById("img-tip-signals").innerHTML = "";
+
+  // Show tooltip immediately with loading state
   const rect = img.getBoundingClientRect();
   tip.style.display = "block";
-  tip.style.left = Math.min(rect.left + window.scrollX, window.innerWidth - 240) + "px";
+  tip.style.left = Math.min(rect.left + window.scrollX, window.innerWidth - 250) + "px";
   tip.style.top  = (rect.bottom + window.scrollY + 8) + "px";
-  const signals = detectImageSignals(img);
-  showImgTooltip(img, signals.aiScore, signals.aiScore > 0.65 ? "Likely AI-generated" : signals.aiScore > 0.35 ? "Possibly AI-generated" : "Likely real photograph", signals.labels);
+  document.getElementById("img-tip-verdict").textContent = "Analyzing with Gemini Vision…";
+  document.getElementById("img-tip-bar").style.width = "15%";
+  document.getElementById("img-tip-signals").innerHTML = "";
+
+  try {
+    // Convert image to base64 via canvas
+    const canvas  = document.createElement("canvas");
+    const MAX_DIM = 800;
+    const w = Math.min(img.naturalWidth  || img.width  || 400, MAX_DIM);
+    const h = Math.min(img.naturalHeight || img.height || 400, MAX_DIM);
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, w, h);
+
+    let b64 = "", mediaType = "image/jpeg";
+    try {
+      b64 = canvas.toDataURL("image/jpeg", 0.75).split(",")[1];
+    } catch(corsErr) {
+      // Cross-origin image — send URL + context instead
+      console.info("[Sentinel] Cross-origin image, sending URL to Gemini");
+    }
+
+    // Gather surrounding context for extra signal
+    const context = [
+      img.alt || "",
+      img.title || "",
+      img.parentElement?.innerText?.slice(0, 150) || "",
+    ].join(" ").trim();
+
+    const resp = await fetch(CREATOR_API_URL.replace("analyze-creator", "analyze-image"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_b64:  b64,
+        media_type: mediaType,
+        image_url:  b64 ? "" : (img.src || img.currentSrc || ""),
+        context,
+      }),
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    const pct = Math.round((data.ai_probability || 0) * 100);
+    const bar = document.getElementById("img-tip-bar");
+    if (bar) {
+      bar.style.width      = pct + "%";
+      bar.style.background = pct > 65 ? "#7C3AED" : pct > 35 ? "#D97706" : "#059669";
+    }
+
+    const verdictMap = {
+      ai_generated:  "AI-generated image",
+      likely_ai:     "Likely AI-generated",
+      uncertain:     "Uncertain — could be either",
+      likely_real:   "Likely a real photograph",
+      real:          "Real photograph / human-made",
+    };
+    document.getElementById("img-tip-verdict").textContent =
+      `${verdictMap[data.verdict] || data.verdict} (${pct}% AI)` +
+      (data.explanation ? `\n${data.explanation}` : "");
+
+    const sigEl = document.getElementById("img-tip-signals");
+    if (sigEl && data.signals?.length) {
+      sigEl.innerHTML = data.signals.map(s => `<span class="s-sig-chip">${s}</span>`).join("");
+    }
+
+    // Fire toast for high-confidence AI images
+    if (pct > 65 && data.confidence !== "low") {
+      showToast({
+        level:   "medium",
+        title:   "AI-Generated Image Detected",
+        message: data.explanation || `This image is ${pct}% likely AI-generated.`,
+        icon:    "image",
+      });
+    }
+
+  } catch(e) {
+    console.warn("[Sentinel] Image analysis error:", e);
+    // Fallback to heuristics
+    const signals = detectImageSignals(img);
+    const pct = Math.round(signals.aiScore * 100);
+    const bar = document.getElementById("img-tip-bar");
+    if (bar) bar.style.width = pct + "%";
+    document.getElementById("img-tip-verdict").textContent =
+      signals.aiScore > 0.65 ? "Likely AI-generated (heuristic)" :
+      signals.aiScore > 0.35 ? "Possibly AI-generated (heuristic)" : "Likely real photograph";
+    const sigEl = document.getElementById("img-tip-signals");
+    if (sigEl) sigEl.innerHTML = signals.labels.map(s => `<span class="s-sig-chip">${s}</span>`).join("");
+  }
 }
 
 function detectImageSignals(img) {
   const labels = []; let score = 0;
   const src = (img.src || img.currentSrc || "").toLowerCase();
-  const aiSrcs = ["thispersondoesnotexist","generated","midjourney","stable-diffusion","dall-e","firefly","imagen","artbreeder","civitai","leonardo.ai"];
-  if (aiSrcs.some(s => src.includes(s))) { score += 0.5; labels.push("AI source URL"); }
+  if (["thispersondoesnotexist","midjourney","stable-diffusion","dall-e","firefly","civitai","leonardo.ai","artbreeder"]
+      .some(s => src.includes(s))) { score += 0.6; labels.push("AI source URL"); }
   const w = img.naturalWidth, h = img.naturalHeight;
   if (w && h) {
-    const ratio = w / h;
-    if ([1.0, 16/9, 4/3, 3/2].some(r => Math.abs(ratio-r) < 0.01)) { score += 0.15; labels.push("Perfect aspect ratio"); }
-    if ([512,768,1024,1280,1536,2048].includes(w) || [512,768,1024,1280,1536,2048].includes(h)) { score += 0.2; labels.push("AI-standard resolution"); }
+    if ([512,768,1024,1280,1536,2048].includes(w) || [512,768,1024,1280,1536,2048].includes(h))
+      { score += 0.25; labels.push("AI-standard resolution"); }
   }
   const alt = (img.alt || img.title || "").toLowerCase();
-  if (["generated","ai art","prompt","render","3d","cgi","illustration","digital art"].some(p => alt.includes(p))) { score += 0.3; labels.push("AI alt text"); }
-  const ctx = img.parentElement?.innerText?.toLowerCase() || "";
-  if (["photo by","©","canon","nikon","shot on","f/","iso "].some(p => ctx.includes(p))) { score -= 0.2; labels.push("Camera metadata"); }
-  if (["ai generated","stable diffusion","midjourney","dall-e","made with ai"].some(p => ctx.includes(p))) { score += 0.4; labels.push("AI page context"); }
-  if (!labels.length) labels.push("No strong signals");
+  if (["generated","ai art","prompt","diffusion","midjourney","dall-e","made with ai"].some(p => alt.includes(p)))
+    { score += 0.35; labels.push("AI descriptor in alt text"); }
+  const ctx = (img.parentElement?.innerText || "").toLowerCase();
+  if (["ai generated","stable diffusion","midjourney","made with ai"].some(p => ctx.includes(p)))
+    { score += 0.4; labels.push("AI context on page"); }
+  if (["photo by","©","canon","nikon","shot on iphone","f/","iso "].some(p => ctx.includes(p)))
+    { score -= 0.2; labels.push("Camera metadata nearby"); }
+  if (!labels.length) labels.push("No strong signals (Gemini unavailable)");
   return { aiScore: Math.max(0, Math.min(1, score)), labels };
 }
 
@@ -1772,37 +1885,157 @@ function showImgTooltip(img, score, verdict, signals) {
   const tip = document.getElementById("s-img-tooltip"); if (!tip) return;
   const pct = Math.round(score * 100);
   const bar = document.getElementById("img-tip-bar");
-  if (bar) { bar.style.width = pct+"%"; bar.style.background = pct > 65 ? "#9B5CF6" : pct > 35 ? "#F5A623" : "#5DD879"; }
-  document.getElementById("img-tip-verdict").textContent = verdict;
-  document.getElementById("img-tip-signals").innerHTML = signals.map(s => `<span class="s-sig-chip">${s}</span>`).join("");
+  if (bar) { bar.style.width = pct+"%"; bar.style.background = pct > 65 ? "#7C3AED" : pct > 35 ? "#D97706" : "#059669"; }
+  const vEl = document.getElementById("img-tip-verdict"); if (vEl) vEl.textContent = verdict;
+  const sEl = document.getElementById("img-tip-signals"); if (sEl) sEl.innerHTML = signals.map(s => `<span class="s-sig-chip">${s}</span>`).join("");
 }
 
-// ── Text AI checker ───────────────────────────────────────────────────────────
+// ── Text AI checker — powered by Gemini ──────────────────────────────────────
+const TEXT_AI_API = API_URL.replace("analyze-text", "analyze-text-ai");
 let selTimer = null;
+
 function toggleTextAi(on) {
   if (on) document.addEventListener("mouseup", onTextSelect);
-  else { document.removeEventListener("mouseup", onTextSelect); const r = document.getElementById("ai-text-result"); if (r) r.style.display = "none"; }
+  else {
+    document.removeEventListener("mouseup", onTextSelect);
+    const r = document.getElementById("ai-text-result");
+    if (r) r.style.display = "none";
+  }
 }
+
 function onTextSelect() {
   clearTimeout(selTimer);
   selTimer = setTimeout(async () => {
-    const sel = window.getSelection();
+    const sel  = window.getSelection();
     const text = sel?.toString().trim();
-    if (!text || text.length < 40) return;
+    if (!text || text.length < 60) return;
     if (sel.anchorNode?.parentElement?.closest("#sentinel-root")) return;
+
     const res = document.getElementById("ai-text-result"); if (!res) return;
     res.style.display = "block";
-    const bar = document.getElementById("ai-text-bar"), pctEl = document.getElementById("ai-text-pct"), verdict = document.getElementById("ai-text-verdict");
-    if (pctEl) pctEl.textContent = "…"; if (verdict) verdict.textContent = "Analyzing…"; if (bar) { bar.style.width = "20%"; bar.style.background = "#333"; }
+    const bar     = document.getElementById("ai-text-bar");
+    const pctEl   = document.getElementById("ai-text-pct");
+    const verdict = document.getElementById("ai-text-verdict");
+    const sigEl   = document.getElementById("ai-text-signals");
+    if (pctEl)   pctEl.textContent   = "…";
+    if (verdict) verdict.textContent = "Analyzing with Gemini…";
+    if (bar)     bar.style.width     = "10%";
+    if (sigEl)   sigEl.innerHTML     = "";
+
     try {
-      const resp = await fetch(API_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ text, mode:"aidetect" }) });
+      const resp = await fetch(TEXT_AI_API, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ text, context: `Selected from: ${document.title} (${location.hostname})` }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      const pct = Math.round((data.ai_score||0)*100);
-      if (bar) { bar.style.width = pct+"%"; bar.style.background = pct>65?"#9B5CF6":pct>35?"#F5A623":"#5DD879"; }
-      if (pctEl) pctEl.textContent = pct+"%";
-      if (verdict) verdict.textContent = pct > 65 ? "Likely AI-generated." : pct > 35 ? "Possibly AI-generated." : "Likely human-written.";
-    } catch { if (verdict) verdict.textContent = "Could not reach backend."; }
-  }, 400);
+
+      const pct = Math.round((data.ai_probability || 0) * 100);
+      if (bar) {
+        bar.style.width      = pct + "%";
+        bar.style.background = pct > 65 ? "#7C3AED" : pct > 35 ? "#D97706" : "#059669";
+      }
+      if (pctEl)   pctEl.textContent   = pct + "%";
+
+      const verdictMap = {
+        ai_generated:  "Very likely written by AI",
+        likely_ai:     "Likely AI-generated text",
+        uncertain:     "Uncertain — mixed signals",
+        likely_human:  "Likely written by a human",
+        human:         "Almost certainly human-written",
+      };
+      if (verdict) verdict.textContent =
+        (verdictMap[data.verdict] || data.verdict) +
+        (data.explanation ? ` — ${data.explanation}` : "");
+
+      if (sigEl && data.signals?.length) {
+        sigEl.innerHTML = data.signals.map(s => `<span class="s-ai-signal-chip">${s}</span>`).join("");
+      }
+
+      // Toast for high-confidence AI text
+      if (pct > 70 && data.confidence !== "low") {
+        showToast({
+          level:   "medium",
+          title:   "AI-Written Text Detected",
+          message: `${pct}% likely AI-generated. ${data.signals?.[0] || ""}`,
+          icon:    "cpu",
+        });
+      }
+    } catch(e) {
+      if (verdict) verdict.textContent = "Could not reach backend.";
+      console.warn("[Sentinel] Text AI error:", e);
+    }
+  }, 500);
+}
+
+// ── Toast notification system ─────────────────────────────────────────────────
+const TOAST_ICONS = {
+  alertTri: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+  shield:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+  check:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><polyline points="20 6 9 17 4 12"/></svg>`,
+  image:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
+  cpu:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>`,
+  lock:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>`,
+  x:        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+};
+
+function showToast({ level = "medium", title, message, icon = "alertTri", duration = 6000 }) {
+  // Respect threshold preference — don't show "low" toasts if user wants medium+
+  const thresholdMap = { low: 0, medium: 1, high: 2 };
+  const levelMap     = { low: 0, medium: 1, high: 2 };
+  const userThresh   = thresholdMap[userPrefs?.alert_threshold || "medium"] || 1;
+  if (levelMap[level] < userThresh) return;
+
+  let container = document.getElementById("s-toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "s-toast-container";
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement("div");
+  toast.className = `s-toast s-toast-${level}`;
+  toast.innerHTML = `
+    <div class="s-toast-icon">${TOAST_ICONS[icon] || TOAST_ICONS.alertTri}</div>
+    <div class="s-toast-body">
+      <div class="s-toast-title">${title}</div>
+      <div class="s-toast-msg">${message}</div>
+      <div class="s-toast-bar" style="animation-duration:${duration}ms"></div>
+    </div>
+    <button class="s-toast-close" aria-label="Dismiss">${TOAST_ICONS.x}</button>
+  `;
+
+  container.appendChild(toast);
+
+  const dismiss = () => {
+    toast.classList.add("s-toast-out");
+    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+  };
+  toast.querySelector(".s-toast-close").addEventListener("click", dismiss);
+  setTimeout(dismiss, duration);
+}
+
+// Call showToast after scan results for high/medium severity
+function maybeToastScanResult(data, mode) {
+  const sev = data.overall_severity || "clean";
+  if (sev === "clean" || sev === "low") return;
+
+  const modeConfig = {
+    toxicity: { icon: "alertTri", title: "Toxic Content Detected" },
+    misinfo:  { icon: "shield",   title: "Misinformation Detected" },
+    scam:     { icon: "lock",     title: "Scam / Phishing Detected" },
+  };
+  const cfg = modeConfig[mode] || { icon: "alertTri", title: "Issue Detected" };
+  const summary = data.reasoning?.summary || `${lastFlags.length} flag(s) found on this page.`;
+
+  showToast({
+    level:   sev === "high" ? "high" : "medium",
+    title:   cfg.title,
+    message: summary.slice(0, 120),
+    icon:    cfg.icon,
+    duration: sev === "high" ? 9000 : 6000,
+  });
 }
 
 // ── MutationObserver ──────────────────────────────────────────────────────────
@@ -1836,3 +2069,11 @@ loadPrefs();
 loadBehaviorLog();
 injectUI();
 observer.observe(document.body, { childList: true, subtree: true });
+
+// Auto-run creator scan on social platforms immediately on page load
+setTimeout(() => {
+  const extracted = extractText();
+  if (extracted.platform && extracted.platform !== "unknown") {
+    runCreatorScan(extracted).catch(() => {});
+  }
+}, 3000);
