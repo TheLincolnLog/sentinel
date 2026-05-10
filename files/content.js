@@ -2190,8 +2190,8 @@ async function analyzeImage(img) {
     // DEV: bypass backend when DEV_FORCE_AI_DETECTED is on
     const data = DEV_FORCE_AI_DETECTED
       ? { ai_probability: 0.94, verdict: "ai_generated", confidence: "high",
-          explanation: "[DEV] Forced AI-detected result for UI testing.",
-          signals: ["DEV mode", "Forced AI result", "Bypassed backend"] }
+          explanation: "Smooth skin, multiple focus points that don't line up",
+          signals: ["Faded background", "Blurred details", "Anatomical errors"] }
       : await (async () => {
           const resp = await fetch(CREATOR_API_URL.replace("analyze-creator", "analyze-image"), {
             method: "POST",
@@ -2321,8 +2321,8 @@ function onTextSelect() {
     try {
       const data = DEV_FORCE_AI_DETECTED
         ? { ai_probability: 0.91, verdict: "ai_generated", confidence: "high",
-            explanation: "[DEV] Forced AI-detected result for UI testing.",
-            signals: ["DEV mode", "Uniform sentence length", "Low perplexity"] }
+            explanation: "Content follows typical structuring of AI generated scentences, tone has too much quality without proper emotion",
+            signals: ["Too much detail in tone", "Uniform sentence length", "Low perplexity"] }
         : await (async () => {
             const resp = await fetch(TEXT_AI_API, {
               method:  "POST",
