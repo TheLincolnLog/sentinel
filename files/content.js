@@ -20,6 +20,11 @@ let observerPaused  = false;
 let imageDetectOn   = false;
 let textAiOn        = false;
 
+// ── DEV: Force AI-detected mode ───────────────────────────────────────────────
+// Set to true to bypass the backend and always return AI-detected results.
+// Flip back to false before shipping.
+const DEV_FORCE_AI_DETECTED = true;
+
 // Scan result cache: url+mode → { data, timestamp }
 const scanCache = new Map();
 
@@ -2182,19 +2187,25 @@ async function analyzeImage(img) {
       img.parentElement?.innerText?.slice(0, 150) || "",
     ].join(" ").trim();
 
-    const resp = await fetch(CREATOR_API_URL.replace("analyze-creator", "analyze-image"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        image_b64:  b64,
-        media_type: mediaType,
-        image_url:  b64 ? "" : (img.src || img.currentSrc || ""),
-        context,
-      }),
-    });
-
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    // DEV: bypass backend when DEV_FORCE_AI_DETECTED is on
+    const data = DEV_FORCE_AI_DETECTED
+      ? { ai_probability: 0.94, verdict: "ai_generated", confidence: "high",
+          explanation: "[DEV] Forced AI-detected result for UI testing.",
+          signals: ["DEV mode", "Forced AI result", "Bypassed backend"] }
+      : await (async () => {
+          const resp = await fetch(CREATOR_API_URL.replace("analyze-creator", "analyze-image"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              image_b64:  b64,
+              media_type: mediaType,
+              image_url:  b64 ? "" : (img.src || img.currentSrc || ""),
+              context,
+            }),
+          });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          return resp.json();
+        })();
 
     const pct = Math.round((data.ai_probability || 0) * 100);
     const bar = document.getElementById("img-tip-bar");
@@ -2308,13 +2319,19 @@ function onTextSelect() {
     if (sigEl)   sigEl.innerHTML     = "";
 
     try {
-      const resp = await fetch(TEXT_AI_API, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ text, context: `Selected from: ${document.title} (${location.hostname})` }),
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
+      const data = DEV_FORCE_AI_DETECTED
+        ? { ai_probability: 0.91, verdict: "ai_generated", confidence: "high",
+            explanation: "[DEV] Forced AI-detected result for UI testing.",
+            signals: ["DEV mode", "Uniform sentence length", "Low perplexity"] }
+        : await (async () => {
+            const resp = await fetch(TEXT_AI_API, {
+              method:  "POST",
+              headers: { "Content-Type": "application/json" },
+              body:    JSON.stringify({ text, context: `Selected from: ${document.title} (${location.hostname})` }),
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return resp.json();
+          })();
 
       const pct = Math.round((data.ai_probability || 0) * 100);
       if (bar) {
