@@ -319,8 +319,9 @@ def run_fast_pass(text, url=""):
     return deduplicate_flags(flags)[:25]
 
 # ── Gemini primary scan ───────────────────────────────────────────────────────
-GEMINI_SYSTEM_PROMPT = """You are Sentinel, a professional cybersecurity and content safety AI.
-Analyze the content below and return ONLY a valid JSON object — no markdown, no preamble.
+GEMINI_SYSTEM_PROMPT = """You are Sentinel, an expert cybersecurity and content integrity AI with deep knowledge of misinformation, AI-generated content, manipulation tactics, and online scams.
+
+Analyze the content below with HIGH SCRUTINY. You must be accurate and not under-score threats.
 
 SOURCE URL: {url}
 PAGE TITLE: {title}
@@ -330,7 +331,7 @@ CONTENT:
 {text}
 \"\"\"
 
-Return this exact JSON structure:
+Return ONLY a raw JSON object — no markdown, no code fences, no preamble:
 {{
   "toxicity": <0.0-1.0>,
   "manipulation": <0.0-1.0>,
@@ -339,34 +340,49 @@ Return this exact JSON structure:
   "scam_score": <0.0-1.0>,
   "overall_severity": "clean|low|medium|high",
   "reasoning": {{
-    "toxicity": "<1-2 sentence explanation>",
-    "manipulation": "<1-2 sentence explanation>",
-    "misinfo": "<1-2 sentence explanation>",
-    "ai_score": "<1-2 sentence explanation>",
-    "scam_score": "<1-2 sentence explanation>",
-    "summary": "<2-3 sentence overall safety verdict a non-technical user can understand>"
+    "toxicity": "<what toxic language or harassment was or was not found>",
+    "manipulation": "<what persuasion or manipulation tactics were or were not found>",
+    "misinfo": "<what false, unverified, or misleading claims were or were not found>",
+    "ai_score": "<specific linguistic evidence this was or was not AI-generated>",
+    "scam_score": "<what scam, phishing, or fraud patterns were or were not found>",
+    "summary": "<2-3 sentence plain-English verdict for a non-technical user>"
   }},
   "gemini_flags": [
-    {{"phrase": "<exact short quote from content, max 80 chars>", "type": "toxicity|manipulation|misinfo|ai|scam|phishing", "severity": "low|medium|high"}}
+    {{"phrase": "<exact quote, max 80 chars>", "type": "toxicity|manipulation|misinfo|ai|scam|phishing", "severity": "low|medium|high"}}
   ]
 }}
 
-SCORING GUIDE:
-- 0.00-0.25: Safe / not present
-- 0.26-0.50: Minor signals, low concern
-- 0.51-0.75: Suspicious, warrants caution
-- 0.76-1.00: Strong evidence of threat
+CRITICAL SCORING INSTRUCTIONS — READ CAREFULLY:
 
-RULES:
-- Satire, opinion, dark humor are NOT misinformation — be conservative
-- ai_score = likelihood the text was AI-generated, not whether that is harmful
-- gemini_flags must only quote phrases actually present in the content
-- Return at most 8 gemini_flags, only for issues with score > 0.3
-- overall_severity must reflect the single highest concern
-"""
+ai_score (is this text AI-generated?):
+- Score 0.7-1.0 if: unnaturally perfect grammar, no typos, formulaic paragraph structure, AI phrases like "it is worth noting / furthermore / in conclusion / delve into / leverage / it is important to note", overly balanced viewpoints, no personal voice, generic examples, seamless transitions
+- Score 0.4-0.6 if: some AI patterns but also human signals
+- Score 0.0-0.3 if: typos, strong personal voice, slang, emotional language, specific personal anecdotes
+- NOTE: An entire webpage that reads like a perfectly written article with no author personality is almost certainly AI-generated. Score it 0.7+
+
+misinfo (false or misleading claims):
+- Score 0.7-1.0 if: specific factual claims without sources, health/medical misinformation, political disinformation, statistics that seem fabricated, "studies show" without citation
+- Score 0.3-0.6 if: some unverified claims but mostly opinion
+- Score 0.0-0.2 if: clearly labeled opinion, satire with obvious markers, verified factual content
+- DO NOT confuse AI-generated with misinformation — they are separate scores
+
+manipulation (psychological manipulation tactics):
+- Score 0.7-1.0 if: urgency/scarcity language, fear appeals, false authority, "they don't want you to know", emotional manipulation, clickbait patterns
+- Score 0.3-0.6 if: mild persuasion language
+- Score 0.0-0.2 if: neutral informational content
+
+overall_severity rules:
+- "high" if ANY score > 0.65
+- "medium" if ANY score > 0.40
+- "low" if ANY score > 0.15
+- "clean" only if ALL scores < 0.15
+
+Return at most 8 gemini_flags, only for scores > 0.35."""
 
 async def _call_groq(prompt: str, max_tokens: int = 1024) -> str | None:
     """Call Groq API (OpenAI-compatible). Returns raw text or None."""
+    if not GROQ_API_KEY:
+        return None
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
@@ -377,10 +393,15 @@ async def _call_groq(prompt: str, max_tokens: int = 1024) -> str | None:
                 },
                 json={
                     "model": GROQ_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a JSON-only response bot. You MUST respond with valid JSON only — no markdown, no explanation, no code fences. Raw JSON only."
+                        },
+                        {"role": "user", "content": prompt}
+                    ],
                     "temperature": 0.1,
                     "max_tokens": max_tokens,
-                    "response_format": {"type": "json_object"},
                 },
             )
         resp.raise_for_status()
@@ -749,23 +770,38 @@ async def analyze_creator(req: CreatorRequest):
 
 
 # ── Gemini Vision — AI Image Detection ───────────────────────────────────────
-IMAGE_PROMPT = """You are an AI image forensics expert. Analyze this image and determine whether it was generated by AI (e.g. Stable Diffusion, Midjourney, DALL-E, Firefly, Sora, Flux) or is a real photograph/human-made artwork.
+IMAGE_PROMPT = """You are an AI image forensics expert with deep knowledge of generative AI artifacts. Analyze this image with HIGH SCRUTINY and determine if it was AI-generated.
 
-Return ONLY valid JSON — no markdown, no preamble:
+Return ONLY raw JSON — no markdown, no code fences:
 {
   "ai_probability": <0.0-1.0>,
   "verdict": "real" | "likely_real" | "uncertain" | "likely_ai" | "ai_generated",
   "confidence": "low" | "medium" | "high",
-  "signals": ["<specific visual signal observed>", ...],
-  "explanation": "<2 sentence plain-English explanation of your reasoning>"
+  "signals": ["<specific visual artifact observed>"],
+  "explanation": "<2 sentence explanation citing specific visual evidence>"
 }
 
-WHAT TO LOOK FOR:
-- AI tells: unnatural skin texture, too-perfect lighting, background inconsistencies, warped text/fingers/teeth, dreamlike sharpness, missing film grain, impossible reflections, symmetry artifacts
-- Real tells: natural noise/grain, lens distortion, chromatic aberration, real-world imperfections, EXIF-style compression artifacts, authentic motion blur
-- Context tells: watermarks from known AI generators, AI platform hosting URLs, alt text mentioning AI
+SCORE HIGH (0.7-1.0) if you see ANY of:
+- Unnaturally smooth or waxy skin texture
+- Perfect symmetry in faces or backgrounds
+- Blurred or incoherent background details
+- Warped, misspelled, or illegible text in the image
+- Extra or missing fingers, limbs, teeth, ears
+- Dreamlike sharpness with no film grain or noise
+- Lighting that is too perfect or comes from impossible angles
+- Hair that blends unnaturally into the background
+- Eyes that are slightly asymmetric or have unnatural catchlights
+- Clothing patterns that don't tile correctly
+- Known AI generator watermarks or metadata
 
-Be specific about signals you actually see. Do not guess blindly — if the image is ambiguous, say so."""
+SCORE LOW (0.0-0.3) if you see:
+- Natural film grain, lens aberration, or compression artifacts
+- Authentic motion blur or depth of field
+- Real-world imperfections (stains, wear, uneven lighting)
+- Consistent shadows and reflections
+- Natural skin pores and texture detail
+
+Be specific. Name the exact artifacts you see. Do not say "no artifacts detected" unless you are highly confident."""
 
 class ImageAnalyzeRequest(BaseModel):
     image_b64:  str            # base64-encoded image
@@ -783,100 +819,115 @@ class ImageAnalyzeResponse(BaseModel):
 
 @app.post("/api/analyze-image", response_model=ImageAnalyzeResponse)
 async def analyze_image(req: ImageAnalyzeRequest):
-    if not GEMINI_API_KEY:
+    if not GEMINI_API_KEY and not GROQ_API_KEY:
         return ImageAnalyzeResponse(ai_probability=0.5, verdict="uncertain",
-            confidence="low", signals=["Gemini API key not set"],
-            explanation="Cannot analyze without Gemini API key.", gemini_active=False)
+            confidence="low", signals=["No AI API key set"],
+            explanation="Cannot analyze without an API key.", gemini_active=False)
 
-    # Build Gemini Vision request
-    parts = [{"text": IMAGE_PROMPT}]
+    # ── Gemini Vision (best — uses actual image pixels) ───────────────────────
+    if GEMINI_API_KEY and (req.image_b64 or req.image_url):
+        parts = [{"text": IMAGE_PROMPT}]
+        if req.image_b64:
+            parts.append({"inline_data": {"mime_type": req.media_type, "data": req.image_b64}})
+        elif req.image_url:
+            parts.append({"file_data": {"file_uri": req.image_url, "mime_type": req.media_type}})
+        if req.context:
+            parts.append({"text": f"\nPage context: {req.context[:300]}"})
 
-    if req.image_b64:
-        parts.append({
-            "inline_data": {
-                "mime_type": req.media_type,
-                "data": req.image_b64,
-            }
-        })
-    elif req.image_url:
-        # Use URL directly via Gemini's file URI support
-        parts.append({"file_data": {"file_uri": req.image_url, "mime_type": req.media_type}})
-    else:
-        return ImageAnalyzeResponse(ai_probability=0.5, verdict="uncertain",
-            confidence="low", signals=["No image data provided"],
-            explanation="No image data received.", gemini_active=False)
-
-    if req.context:
-        parts.append({"text": f"\nAdditional context from the surrounding page: {req.context[:300]}"})
-
-    # Rate limit
-    await _rate_wait()
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{GEMINI_VIS_URL}?key={GEMINI_API_KEY}",
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": parts}],
-                    "generationConfig": {
-                        "temperature": 0.1,
-                        "maxOutputTokens": 512,
+        await _rate_wait()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{GEMINI_VIS_URL}?key={GEMINI_API_KEY}",
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "contents": [{"parts": parts}],
+                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 512},
                     },
-                },
+                )
+            resp.raise_for_status()
+            raw      = resp.json()
+            text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
+            text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
+            result   = json.loads(text_out)
+            return ImageAnalyzeResponse(
+                ai_probability = float(result.get("ai_probability", 0.5)),
+                verdict        = result.get("verdict", "uncertain"),
+                confidence     = result.get("confidence", "low"),
+                signals        = result.get("signals", [])[:6],
+                explanation    = result.get("explanation", ""),
+                gemini_active  = True,
             )
-        resp.raise_for_status()
-        raw      = resp.json()
-        text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
-        text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
-        result   = json.loads(text_out)
-        return ImageAnalyzeResponse(
-            ai_probability = float(result.get("ai_probability", 0.5)),
-            verdict        = result.get("verdict", "uncertain"),
-            confidence     = result.get("confidence", "low"),
-            signals        = result.get("signals", [])[:6],
-            explanation    = result.get("explanation", ""),
-            gemini_active  = True,
-        )
-    except Exception as e:
-        print(f"⚠  Gemini Vision error: {e}")
-        return ImageAnalyzeResponse(ai_probability=0.5, verdict="uncertain",
-            confidence="low", signals=[str(e)[:80]],
-            explanation="Gemini Vision analysis failed.", gemini_active=False)
+        except Exception as e:
+            print(f"⚠  Gemini Vision error: {e} — trying Groq text fallback")
+
+    # ── Groq text fallback (uses context/alt text only, no pixels) ────────────
+    if GROQ_API_KEY:
+        context_prompt = f"""Analyze whether this image is likely AI-generated based on the following contextual information:
+URL/source: {req.image_url or 'unknown'}
+Alt text / surrounding context: {req.context or 'none provided'}
+Image dimensions hint: base64 data {'provided' if req.image_b64 else 'not provided'}
+
+Based on the source URL and any context clues, estimate the probability this is AI-generated.
+Known AI image sources: thispersondoesnotexist.com, midjourney.com, civitai.com, lexica.art, playground.ai, ideogram.ai, firefly.adobe.com, dall-e, stable-diffusion, nightcafe, artbreeder.
+
+{IMAGE_PROMPT}"""
+        result = await call_ai(context_prompt, cache_key_str=req.image_url or req.context or "", max_tokens=512)
+        if result:
+            return ImageAnalyzeResponse(
+                ai_probability = float(result.get("ai_probability", 0.5)),
+                verdict        = result.get("verdict", "uncertain"),
+                confidence     = "low",  # always low for text-only analysis
+                signals        = result.get("signals", []) + ["Note: context-only analysis, no pixel data"],
+                explanation    = result.get("explanation", "") + " (Groq text-based analysis — no image pixels available)",
+                gemini_active  = True,
+            )
+
+    # Final fallback — heuristics only
+    return ImageAnalyzeResponse(ai_probability=0.5, verdict="uncertain",
+        confidence="low", signals=["AI vision unavailable"],
+        explanation="Could not analyze image — set GEMINI_API_KEY for visual analysis.", gemini_active=False)
 
 
 # ── Gemini AI Text Detection ──────────────────────────────────────────────────
-AI_TEXT_PROMPT = """You are an expert AI text detector. Your job is to determine whether the following text was written by an AI language model (ChatGPT, Claude, Gemini, Llama, etc.) or by a human.
+AI_TEXT_PROMPT = """You are an expert AI text detector trained to identify content written by language models like ChatGPT, Claude, Gemini, and Llama. You must be highly accurate and not under-score AI-generated text.
 
 TEXT TO ANALYZE:
 \"\"\"
 {text}
 \"\"\"
 
-Return ONLY valid JSON — no markdown, no preamble:
+Return ONLY raw JSON — no markdown, no code fences:
 {{
   "ai_probability": <0.0-1.0>,
   "verdict": "human" | "likely_human" | "uncertain" | "likely_ai" | "ai_generated",
   "confidence": "low" | "medium" | "high",
-  "signals": ["<specific linguistic signal>", ...],
-  "explanation": "<2 sentence explanation of key signals that led to this verdict>"
+  "signals": ["<specific linguistic signal observed>"],
+  "explanation": "<2 sentence explanation citing specific phrases or patterns>"
 }}
 
-KEY AI SIGNALS TO DETECT:
-- Structural: perfect paragraph transitions, formulaic intro/conclusion, numbered lists without being asked
-- Lexical: "it's worth noting", "furthermore", "in conclusion", "it is important to", "plays a crucial role", "delve into", "leverage", "comprehensive", "multifaceted"
-- Stylistic: unnaturally consistent sentence length, no typos or colloquialisms, overly balanced "on one hand / on the other", hedge stacking
-- Content: generic examples, lack of personal voice, no specific dates/names/places, safely neutral on all topics
-- Formatting: bullet points where prose would be natural, bold headers in casual contexts
+SCORE HIGH (0.7-1.0) — strong AI signals:
+- Uses phrases: "it is worth noting", "furthermore", "moreover", "in conclusion", "it is important to", "plays a crucial role", "delve into", "leverage", "comprehensive overview", "multifaceted", "it should be noted", "in the realm of", "at the end of the day", "moving forward"
+- Perfectly structured paragraphs with topic sentence + body + transition
+- Every sentence is grammatically perfect with no colloquialisms
+- Unnaturally consistent sentence length (no very short or very long sentences)
+- Hedging on every claim: "may", "could", "might", "some argue"
+- Lists everything in sets of three
+- No specific personal anecdotes, no strong opinions, no humor
+- Overly balanced "on one hand / on the other hand" framing
+- Generic placeholders instead of specific examples
 
-KEY HUMAN SIGNALS:
-- Typos, grammatical quirks, run-on sentences
-- Specific personal anecdotes, strong opinions
-- Informal contractions, slang, humor
-- Inconsistent style or register
-- Emotional language, frustration, excitement
+SCORE LOW (0.0-0.3) — strong human signals:
+- Typos, grammatical errors, run-on sentences
+- Specific named people, places, dates from personal experience
+- Strong one-sided opinions without hedging
+- Slang, contractions, casual language
+- Emotional outbursts, frustration, excitement
+- Inconsistent style or register changes
+- Stream of consciousness writing
 
-Be calibrated: short texts under 100 words are harder to classify reliably. Say so in confidence."""
+IMPORTANT: Short texts under 80 words are unreliable — set confidence to "low".
+IMPORTANT: Academic or formal writing is NOT automatically AI — look for the specific phrases above."""
 
 class TextAiRequest(BaseModel):
     text: str
