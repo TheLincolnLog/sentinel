@@ -25,11 +25,10 @@ app.add_middleware(
 )
 
 # ── Gemini config ─────────────────────────────────────────────────────────────
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")  # set in your environment
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash:generateContent"
-)
+GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_BASE     = "https://generativelanguage.googleapis.com/v1beta/models"
+GEMINI_URL      = f"{GEMINI_BASE}/gemini-1.5-flash-latest:generateContent"
+GEMINI_VIS_URL  = f"{GEMINI_BASE}/gemini-1.5-flash-latest:generateContent"
 
 # ── Load ML model ─────────────────────────────────────────────────────────────
 MODEL_PATH = "model.pkl"
@@ -327,28 +326,29 @@ async def call_gemini(text: str, url: str = "", title: str = "") -> dict | None:
     )
 
     try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{GEMINI_URL}?key={GEMINI_API_KEY}",
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {
-                        "temperature": 0.1,        # low = consistent, less hallucination
+                        "temperature": 0.1,
                         "maxOutputTokens": 1024,
-                        "responseMimeType": "application/json",
                     },
                 },
             )
         resp.raise_for_status()
-        raw = resp.json()
+        raw      = resp.json()
         text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
+        # Strip markdown fences if Gemini wraps response
+        text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
         return json.loads(text_out)
     except json.JSONDecodeError as e:
         print(f"⚠  Gemini JSON parse error: {e}")
         return None
     except httpx.HTTPStatusError as e:
-        print(f"⚠  Gemini HTTP error {e.response.status_code}: {e.response.text[:200]}")
+        print(f"⚠  Gemini HTTP {e.response.status_code}: {e.response.text[:300]}")
         return None
     except Exception as e:
         print(f"⚠  Gemini call failed: {e}")
@@ -599,7 +599,7 @@ async def analyze_creator(req: CreatorRequest):
     gemini_result = None
     if GEMINI_API_KEY:
         try:
-            async with httpx.AsyncClient(timeout=25.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{GEMINI_URL}?key={GEMINI_API_KEY}",
                     headers={"Content-Type": "application/json"},
@@ -608,13 +608,13 @@ async def analyze_creator(req: CreatorRequest):
                         "generationConfig": {
                             "temperature": 0.1,
                             "maxOutputTokens": 1024,
-                            "responseMimeType": "application/json",
                         },
                     },
                 )
             resp.raise_for_status()
-            raw = resp.json()
+            raw      = resp.json()
             text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
+            text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
             gemini_result = json.loads(text_out)
         except Exception as e:
             print(f"⚠  Gemini creator scan error: {e}")
@@ -716,21 +716,21 @@ async def analyze_image(req: ImageAnalyzeRequest):
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}",
+                f"{GEMINI_VIS_URL}?key={GEMINI_API_KEY}",
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": parts}],
                     "generationConfig": {
                         "temperature": 0.1,
                         "maxOutputTokens": 512,
-                        "responseMimeType": "application/json",
                     },
                 },
             )
         resp.raise_for_status()
-        raw     = resp.json()
+        raw      = resp.json()
         text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
-        result  = json.loads(text_out)
+        text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
+        result   = json.loads(text_out)
         return ImageAnalyzeResponse(
             ai_probability = float(result.get("ai_probability", 0.5)),
             verdict        = result.get("verdict", "uncertain"),
@@ -812,22 +812,22 @@ async def analyze_text_ai(req: TextAiRequest):
         prompt += f"\n\nContext about where this text appeared: {req.context}"
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=25.0) as client:
             resp = await client.post(
                 f"{GEMINI_URL}?key={GEMINI_API_KEY}",
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {
-                        "temperature": 0.05,     # very low — we want consistent classification
+                        "temperature": 0.05,
                         "maxOutputTokens": 512,
-                        "responseMimeType": "application/json",
                     },
                 },
             )
         resp.raise_for_status()
         raw      = resp.json()
         text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
+        text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
         result   = json.loads(text_out)
         return TextAiResponse(
             ai_probability = float(result.get("ai_probability", 0.5)),
@@ -850,7 +850,7 @@ async def analyze_text_ai(req: TextAiRequest):
 @app.get("/")
 def health():
     return {
-        "status":       "Sentinel v7 running",
+        "status":       "Sentinel v8 running",
         "architecture": "Gemini primary judge + ML/keyword first-pass",
         "gemini":       "active" if GEMINI_API_KEY else "⚠ GEMINI_API_KEY not set",
         "ml_model":     "loaded" if ml_classifier else "keyword fallback",
