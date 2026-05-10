@@ -30,6 +30,53 @@ GEMINI_BASE     = "https://generativelanguage.googleapis.com/v1/models"
 GEMINI_URL      = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
 GEMINI_VIS_URL  = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
 
+# ── Rate limiter — respects free tier (15 RPM) ────────────────────────────────
+import asyncio, time, hashlib as _hs
+from collections import deque
+
+# Set to 10 to stay safely under the 15 RPM free limit
+# Change to 50 if you have billing enabled
+GEMINI_RPM_LIMIT = 10
+
+_request_times: deque = deque()   # timestamps of recent Gemini calls
+_rate_lock = asyncio.Lock()
+
+async def _gemini_rate_wait():
+    """Block until we're safely under the RPM limit."""
+    async with _rate_lock:
+        now = time.monotonic()
+        # Drop timestamps older than 60 seconds
+        while _request_times and now - _request_times[0] > 60:
+            _request_times.popleft()
+        if len(_request_times) >= GEMINI_RPM_LIMIT:
+            # Wait until the oldest request is > 60s ago
+            wait_for = 61 - (now - _request_times[0])
+            if wait_for > 0:
+                await asyncio.sleep(wait_for)
+        _request_times.append(time.monotonic())
+
+# ── Response cache — avoid re-calling Gemini for identical content ────────────
+# Key: sha256 of (prompt_type + first 500 chars of content)
+# TTL: 10 minutes
+_response_cache: dict = {}
+CACHE_TTL = 600  # seconds
+
+def _cache_key(prefix: str, content: str) -> str:
+    return _hs.sha256(f"{prefix}:{content[:500]}".encode()).hexdigest()
+
+def _cache_get(key: str):
+    entry = _response_cache.get(key)
+    if entry and time.monotonic() - entry["ts"] < CACHE_TTL:
+        return entry["val"]
+    return None
+
+def _cache_set(key: str, val):
+    _response_cache[key] = {"val": val, "ts": time.monotonic()}
+    # Prune if cache grows large
+    if len(_response_cache) > 200:
+        oldest = min(_response_cache, key=lambda k: _response_cache[k]["ts"])
+        del _response_cache[oldest]
+
 # ── Load ML model ─────────────────────────────────────────────────────────────
 MODEL_PATH = "model.pkl"
 ml_features = ml_classifier = None
@@ -314,16 +361,26 @@ RULES:
 """
 
 async def call_gemini(text: str, url: str = "", title: str = "") -> dict | None:
-    """Call Gemini 1.5 Flash and return parsed JSON result, or None on failure."""
+    """Call Gemini 2.0 Flash with rate limiting and response caching."""
     if not GEMINI_API_KEY:
         print("⚠  GEMINI_API_KEY not set — skipping Gemini scan")
         return None
+
+    # Check cache first — avoids re-calling for same page content
+    ck = _cache_key("analyze-text", text + url)
+    cached = _cache_get(ck)
+    if cached:
+        print("✓  Gemini cache hit")
+        return cached
 
     prompt = GEMINI_SYSTEM_PROMPT.format(
         url=url or "unknown",
         title=title or "unknown",
         text=text[:7000],
     )
+
+    # Wait if near the rate limit
+    await _gemini_rate_wait()
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -341,9 +398,10 @@ async def call_gemini(text: str, url: str = "", title: str = "") -> dict | None:
         resp.raise_for_status()
         raw      = resp.json()
         text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
-        # Strip markdown fences if Gemini wraps response
         text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
-        return json.loads(text_out)
+        result   = json.loads(text_out)
+        _cache_set(ck, result)
+        return result
     except json.JSONDecodeError as e:
         print(f"⚠  Gemini JSON parse error: {e}")
         return None
@@ -598,7 +656,14 @@ async def analyze_creator(req: CreatorRequest):
 
     gemini_result = None
     if GEMINI_API_KEY:
-        try:
+        # Check cache
+        ck = _cache_key("creator", (req.creator_name or "") + (req.caption or "") + req.platform)
+        gemini_result = _cache_get(ck)
+        if gemini_result:
+            print("✓  Creator Gemini cache hit")
+        else:
+          try:
+            await _gemini_rate_wait()
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{GEMINI_URL}?key={GEMINI_API_KEY}",
@@ -616,7 +681,8 @@ async def analyze_creator(req: CreatorRequest):
             text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
             text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
             gemini_result = json.loads(text_out)
-        except Exception as e:
+            _cache_set(ck, gemini_result)
+          except Exception as e:
             print(f"⚠  Gemini creator scan error: {e}")
 
     if gemini_result:
@@ -712,6 +778,9 @@ async def analyze_image(req: ImageAnalyzeRequest):
 
     if req.context:
         parts.append({"text": f"\nAdditional context from the surrounding page: {req.context[:300]}"})
+
+    # Rate limit
+    await _gemini_rate_wait()
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -810,6 +879,8 @@ async def analyze_text_ai(req: TextAiRequest):
     prompt = AI_TEXT_PROMPT.format(text=text)
     if req.context:
         prompt += f"\n\nContext about where this text appeared: {req.context}"
+
+    await _gemini_rate_wait()
 
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
