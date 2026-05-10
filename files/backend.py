@@ -1,14 +1,15 @@
 # backend.py — Sentinel v8
 # Architecture:
-#   1. ML model + keyword lists → instant flags for page highlighting (fast first-pass)
-#   2. Groq (llama-3.3-70b)    → primary text scores + reasoning (authoritative judge)
-#   3. Groq vision via GPT-4o  → AI image detection
-#   4. Groq text-AI detector   → dedicated AI text detection
+#   1. ML model + keyword lists → instant flags (fast first-pass)
+#   2. OpenAI GPT-4o-mini       → primary AI judge for all scanning
+#   3. OpenAI GPT-4o            → AI image detection (vision)
+#   4. Groq                     → fallback if OpenAI unavailable
+#   5. Gemini                   → final fallback
 #
 # Run:     uvicorn backend:app --reload
 # Install: pip install fastapi uvicorn scikit-learn joblib httpx
-# Set env: export GROQ_API_KEY="your-key-here"
-# Get key: console.groq.com (free, no credit card)
+# Set env: export OPENAI_API_KEY="your-key-here"
+# Get key: platform.openai.com
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,25 +26,29 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-# ── AI config — Groq (free tier: 14,400 req/day, 30 RPM, no card needed) ─────
-GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "")
-GROQ_URL      = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL    = "llama-3.3-70b-versatile"   # best free model on Groq
-GROQ_RPM_LIMIT = 25   # safely under Groq's 30 RPM free limit
+# ── AI config ─────────────────────────────────────────────────────────────────
+# Priority: OpenAI → Groq → Gemini
+# Set OPENAI_API_KEY in Render environment for best results.
 
-# OpenAI fallback. Used when Groq/Gemini are unset, rate-limited, or fail.
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_URL     = "https://api.openai.com/v1/chat/completions"
-OPENAI_MODEL   = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_API_KEY  = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_URL      = "https://api.openai.com/v1/chat/completions"
+OPENAI_VIS_URL  = "https://api.openai.com/v1/chat/completions"
+OPENAI_MODEL    = "gpt-4o-mini"   # fast, cheap, accurate
+OPENAI_VIS_MODEL= "gpt-4o"        # vision model for image analysis
 
-# Keep GEMINI_API_KEY as fallback if user still has it set
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_BASE    = "https://generativelanguage.googleapis.com/v1/models"
-GEMINI_URL     = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
-GEMINI_VIS_URL = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
+GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
+GROQ_URL        = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL      = "llama-3.3-70b-versatile"
+GROQ_RPM_LIMIT  = 25
 
-# Primary key — use Groq if available, fall back to Gemini
-USE_GROQ = bool(GROQ_API_KEY)
+GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_BASE     = "https://generativelanguage.googleapis.com/v1/models"
+GEMINI_URL      = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
+GEMINI_VIS_URL  = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
+
+# Which provider is active (checked in priority order)
+USE_OPENAI = bool(OPENAI_API_KEY)
+USE_GROQ   = bool(GROQ_API_KEY) and not USE_OPENAI
 
 # ── Rate limiter ──────────────────────────────────────────────────────────────
 import asyncio, time, hashlib as _hs
@@ -54,7 +59,10 @@ _rate_lock = asyncio.Lock()
 
 async def _rate_wait():
     """Block until safely under RPM limit for whichever provider is active."""
-    limit = GROQ_RPM_LIMIT if USE_GROQ else 10
+    # OpenAI: 500 RPM on free, 3500 on tier-1 — use 60 to be safe on free
+    # Groq: 30 RPM free — use 25
+    # Gemini: 15 RPM free — use 10
+    limit = 60 if USE_OPENAI else (GROQ_RPM_LIMIT if USE_GROQ else 10)
     async with _rate_lock:
         now = time.monotonic()
         while _request_times and now - _request_times[0] > 60:
@@ -506,8 +514,44 @@ overall_severity rules:
 
 Return at most 8 gemini_flags, only for scores > 0.35."""
 
+async def _call_openai(prompt: str, max_tokens: int = 1024) -> str | None:
+    """Call OpenAI chat completions. Returns raw text or None."""
+    if not OPENAI_API_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                OPENAI_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                },
+                json={
+                    "model": OPENAI_MODEL,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a JSON-only response bot. Respond with valid JSON only — no markdown, no code fences, no explanation. Raw JSON only."
+                        },
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": max_tokens,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except httpx.HTTPStatusError as e:
+        print(f"⚠  OpenAI HTTP {e.response.status_code}: {e.response.text[:300]}")
+        return None
+    except Exception as e:
+        print(f"⚠  OpenAI call failed: {e}")
+        return None
+
+
 async def _call_groq(prompt: str, max_tokens: int = 1024) -> str | None:
-    """Call Groq API (OpenAI-compatible). Returns raw text or None."""
+    """Call Groq (fallback). Returns raw text or None."""
     if not GROQ_API_KEY:
         return None
     try:
@@ -523,7 +567,7 @@ async def _call_groq(prompt: str, max_tokens: int = 1024) -> str | None:
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a JSON-only response bot. You MUST respond with valid JSON only — no markdown, no explanation, no code fences. Raw JSON only."
+                            "content": "You are a JSON-only response bot. Respond with valid JSON only — no markdown, no code fences. Raw JSON only."
                         },
                         {"role": "user", "content": prompt}
                     ],
@@ -542,7 +586,7 @@ async def _call_groq(prompt: str, max_tokens: int = 1024) -> str | None:
 
 
 async def _call_gemini_text(prompt: str, max_tokens: int = 1024) -> str | None:
-    """Call Gemini REST API. Returns raw text or None."""
+    """Call Gemini (final fallback). Returns raw text or None."""
     if not GEMINI_API_KEY:
         return None
     try:
@@ -562,48 +606,11 @@ async def _call_gemini_text(prompt: str, max_tokens: int = 1024) -> str | None:
         return None
 
 
-async def _call_openai(prompt: str, max_tokens: int = 1024) -> str | None:
-    """Call OpenAI Chat Completions as the final text-analysis fallback."""
-    if not OPENAI_API_KEY:
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                OPENAI_URL,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                },
-                json={
-                    "model": OPENAI_MODEL,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are a JSON-only response bot. Return valid JSON only, with no markdown, prose, or code fences."
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": max_tokens,
-                    "response_format": {"type": "json_object"},
-                },
-            )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
-    except httpx.HTTPStatusError as e:
-        print(f"OpenAI HTTP {e.response.status_code}: {e.response.text[:300]}")
-        return None
-    except Exception as e:
-        print(f"OpenAI call failed: {e}")
-        return None
-
-
 async def call_ai(prompt: str, cache_key_str: str = "", max_tokens: int = 1024) -> dict | None:
     """
-    Primary AI call — tries Groq first, falls back to Gemini.
+    Primary AI call — OpenAI → Groq → Gemini fallback chain.
     Includes caching and rate limiting.
     """
-    # Cache check
     if cache_key_str:
         ck = _cache_key("ai", cache_key_str)
         cached = _cache_get(ck)
@@ -614,17 +621,22 @@ async def call_ai(prompt: str, cache_key_str: str = "", max_tokens: int = 1024) 
     await _rate_wait()
 
     raw_text = None
-    if USE_GROQ:
+
+    if USE_OPENAI:
+        raw_text = await _call_openai(prompt, max_tokens)
+        if raw_text is None:
+            print("⚠  OpenAI failed — trying Groq")
+            raw_text = await _call_groq(prompt, max_tokens)
+        if raw_text is None:
+            print("⚠  Groq failed — trying Gemini")
+            raw_text = await _call_gemini_text(prompt, max_tokens)
+    elif USE_GROQ:
         raw_text = await _call_groq(prompt, max_tokens)
         if raw_text is None:
-            print("⚠  Groq failed — trying Gemini fallback")
+            print("⚠  Groq failed — trying Gemini")
             raw_text = await _call_gemini_text(prompt, max_tokens)
     else:
         raw_text = await _call_gemini_text(prompt, max_tokens)
-
-    if raw_text is None:
-        print("Groq/Gemini unavailable - trying OpenAI fallback")
-        raw_text = await _call_openai(prompt, max_tokens)
 
     if not raw_text:
         return None
@@ -638,8 +650,6 @@ async def call_ai(prompt: str, cache_key_str: str = "", max_tokens: int = 1024) 
     except json.JSONDecodeError as e:
         print(f"⚠  AI JSON parse error: {e}\nRaw: {raw_text[:200]}")
         return None
-
-
 # Alias for backward compat with any code still calling call_gemini
 async def call_gemini(text: str, url: str = "", title: str = "") -> dict | None:
     prompt = GEMINI_SYSTEM_PROMPT.format(
@@ -1058,12 +1068,72 @@ class ImageAnalyzeResponse(BaseModel):
 
 @app.post("/api/analyze-image", response_model=ImageAnalyzeResponse)
 async def analyze_image(req: ImageAnalyzeRequest):
-    if not GEMINI_API_KEY and not GROQ_API_KEY and not OPENAI_API_KEY:
+    if not OPENAI_API_KEY and not GEMINI_API_KEY and not GROQ_API_KEY:
         return ImageAnalyzeResponse(ai_probability=0.5, verdict="uncertain",
             confidence="low", signals=["No AI API key set"],
             explanation="Cannot analyze without an API key.", gemini_active=False)
 
-    # ── Gemini Vision (best — uses actual image pixels) ───────────────────────
+    # ── OpenAI GPT-4o Vision (primary — best accuracy) ────────────────────────
+    if OPENAI_API_KEY and (req.image_b64 or req.image_url):
+        await _rate_wait()
+        try:
+            # Build image content block
+            if req.image_b64:
+                img_content = {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{req.media_type};base64,{req.image_b64}", "detail": "high"}
+                }
+            else:
+                img_content = {
+                    "type": "image_url",
+                    "image_url": {"url": req.image_url, "detail": "high"}
+                }
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a JSON-only response bot. Respond with valid JSON only — no markdown, no code fences."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": IMAGE_PROMPT},
+                        img_content,
+                    ] + ([{"type": "text", "text": f"Page context: {req.context[:300]}"}] if req.context else [])
+                }
+            ]
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    OPENAI_VIS_URL,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    },
+                    json={
+                        "model": OPENAI_VIS_MODEL,
+                        "messages": messages,
+                        "temperature": 0.1,
+                        "max_tokens": 512,
+                        "response_format": {"type": "json_object"},
+                    },
+                )
+            resp.raise_for_status()
+            text_out = resp.json()["choices"][0]["message"]["content"]
+            text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
+            result   = json.loads(text_out)
+            return ImageAnalyzeResponse(
+                ai_probability = float(result.get("ai_probability", 0.5)),
+                verdict        = result.get("verdict", "uncertain"),
+                confidence     = result.get("confidence", "low"),
+                signals        = result.get("signals", [])[:6],
+                explanation    = result.get("explanation", ""),
+                gemini_active  = True,
+            )
+        except Exception as e:
+            print(f"⚠  OpenAI Vision error: {e} — trying Gemini Vision fallback")
+
+    # ── Gemini Vision (fallback if OpenAI unavailable) ────────────────────────
     if GEMINI_API_KEY and (req.image_b64 or req.image_url):
         parts = [{"text": IMAGE_PROMPT}]
         if req.image_b64:
@@ -1072,8 +1142,6 @@ async def analyze_image(req: ImageAnalyzeRequest):
             parts.append({"file_data": {"file_uri": req.image_url, "mime_type": req.media_type}})
         if req.context:
             parts.append({"text": f"\nPage context: {req.context[:300]}"})
-
-        await _rate_wait()
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
@@ -1098,34 +1166,30 @@ async def analyze_image(req: ImageAnalyzeRequest):
                 gemini_active  = True,
             )
         except Exception as e:
-            print(f"⚠  Gemini Vision error: {e} — trying Groq text fallback")
+            print(f"⚠  Gemini Vision error: {e} — trying text fallback")
 
-    # ── Groq text fallback (uses context/alt text only, no pixels) ────────────
-    if GROQ_API_KEY or OPENAI_API_KEY:
-        context_prompt = f"""Analyze whether this image is likely AI-generated based on the following contextual information:
+    # ── Text-only fallback (context/URL analysis, no pixels) ─────────────────
+    context_prompt = f"""Analyze whether this image is likely AI-generated based on context only:
 URL/source: {req.image_url or 'unknown'}
-Alt text / surrounding context: {req.context or 'none provided'}
-Image dimensions hint: base64 data {'provided' if req.image_b64 else 'not provided'}
-
-Based on the source URL and any context clues, estimate the probability this is AI-generated.
-Known AI image sources: thispersondoesnotexist.com, midjourney.com, civitai.com, lexica.art, playground.ai, ideogram.ai, firefly.adobe.com, dall-e, stable-diffusion, nightcafe, artbreeder.
+Alt text / page context: {req.context or 'none provided'}
+Known AI image sources: thispersondoesnotexist.com, midjourney.com, civitai.com, lexica.art,
+playground.ai, ideogram.ai, firefly.adobe.com, dall-e, stable-diffusion, nightcafe, artbreeder.
 
 {IMAGE_PROMPT}"""
-        result = await call_ai(context_prompt, cache_key_str=req.image_url or req.context or "", max_tokens=512)
-        if result:
-            return ImageAnalyzeResponse(
-                ai_probability = float(result.get("ai_probability", 0.5)),
-                verdict        = result.get("verdict", "uncertain"),
-                confidence     = "low",  # always low for text-only analysis
-                signals        = result.get("signals", []) + ["Note: context-only analysis, no pixel data"],
-                explanation    = result.get("explanation", "") + " (Groq text-based analysis — no image pixels available)",
-                gemini_active  = True,
-            )
+    result = await call_ai(context_prompt, cache_key_str=req.image_url or req.context or "", max_tokens=512)
+    if result:
+        return ImageAnalyzeResponse(
+            ai_probability = float(result.get("ai_probability", 0.5)),
+            verdict        = result.get("verdict", "uncertain"),
+            confidence     = "low",
+            signals        = result.get("signals", []) + ["Context-only analysis — no pixel data available"],
+            explanation    = result.get("explanation", "") + " (Text-based analysis — no image pixels sent.)",
+            gemini_active  = True,
+        )
 
-    # Final fallback — heuristics only
     return ImageAnalyzeResponse(ai_probability=0.5, verdict="uncertain",
-        confidence="low", signals=["AI vision unavailable"],
-        explanation="Could not analyze image — set GEMINI_API_KEY for visual analysis.", gemini_active=False)
+        confidence="low", signals=["Vision analysis unavailable"],
+        explanation="Could not analyze image — set OPENAI_API_KEY for visual analysis.", gemini_active=False)
 
 
 # ── Gemini AI Text Detection ──────────────────────────────────────────────────
@@ -1222,13 +1286,21 @@ async def analyze_text_ai(req: TextAiRequest):
 
 @app.get("/")
 def health():
-    ai_provider = "groq" if USE_GROQ else ("gemini" if GEMINI_API_KEY else ("openai" if OPENAI_API_KEY else "none"))
+    if USE_OPENAI:
+        ai_provider = f"openai ({OPENAI_MODEL})"
+    elif USE_GROQ:
+        ai_provider = f"groq ({GROQ_MODEL})"
+    elif GEMINI_API_KEY:
+        ai_provider = "gemini (fallback)"
+    else:
+        ai_provider = "none — set OPENAI_API_KEY"
     return {
         "status":       "Sentinel v8 running",
         "ai_provider":  ai_provider,
-        "groq":         "active" if GROQ_API_KEY else "not set",
-        "gemini":       "active" if GEMINI_API_KEY else "not set (image fallback only)",
-        "openai":       "active" if OPENAI_API_KEY else "not set",
+        "openai":       f"active ({OPENAI_MODEL})" if OPENAI_API_KEY else "not set",
+        "vision":       f"active ({OPENAI_VIS_MODEL})" if OPENAI_API_KEY else ("gemini fallback" if GEMINI_API_KEY else "unavailable"),
+        "groq":         "active (fallback)" if GROQ_API_KEY else "not set",
+        "gemini":       "active (fallback)" if GEMINI_API_KEY else "not set",
         "ml_model":     "loaded" if ml_classifier else "keyword fallback",
         "val_acc":      model_info.get("val_acc", "n/a"),
         "whitelist":    f"{len(whitelist)} phrases protected",
