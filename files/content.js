@@ -769,22 +769,18 @@ function injectUI() {
           <div class="s-screen-label">${IC.alertTri} Toxicity Check</div>
           <button class="s-close-btn" id="s-close-tox">${IC.x}</button>
         </div>
-        <div class="s-score-card">
-          <div class="s-score-ring-wrap">
-            <svg width="68" height="68" viewBox="0 0 68 68">
-              <circle class="s-score-ring-bg" cx="34" cy="34" r="28"/>
-              <circle class="s-score-ring-fg" id="tox-ring" cx="34" cy="34" r="28"
-                stroke="#DC2626" stroke-dasharray="175.9" stroke-dashoffset="175.9"/>
+        <div class="s-score-card-v2">
+          <div class="s-gauge-wrap">
+            <svg class="s-gauge-svg" width="160" height="88" viewBox="0 0 160 88">
+              <path class="s-gauge-bg" d="M 16,80 A 64,64 0 0,1 144,80" stroke-dasharray="201.1" stroke-dashoffset="0"/>
+              <path class="s-gauge-fg" id="tox-gauge" d="M 16,80 A 64,64 0 0,1 144,80"
+                stroke="#DC2626" stroke-dasharray="201.1" stroke-dashoffset="201.1"/>
             </svg>
-            <div class="s-score-inner">
-              <div class="s-score-num" id="tox-pct">0%</div>
-              <div class="s-score-lbl">RISK</div>
-            </div>
+            <div class="s-gauge-pct" id="tox-pct" style="margin-top:-52px">0%</div>
+            <div class="s-gauge-label">RISK LEVEL</div>
           </div>
-          <div class="s-score-info">
-            <div class="s-score-verdict" id="tox-verdict">Ready to scan</div>
-            <div class="s-score-detail" id="tox-detail">Scan this page for toxic content, hate speech, and cyberbullying.</div>
-          </div>
+          <div class="s-score-verdict-v2" id="tox-verdict">Ready to scan</div>
+          <div class="s-score-detail-v2" id="tox-detail">Scan this page for toxic content, hate speech, and cyberbullying.</div>
         </div>
         <div class="s-actions">
           <button class="s-scan-btn s-btn-tox" id="tox-scan">${IC.play} Scan Page</button>
@@ -816,22 +812,18 @@ function injectUI() {
           <div class="s-screen-label">${IC.search} Fact Check</div>
           <button class="s-close-btn" id="s-close-mis">${IC.x}</button>
         </div>
-        <div class="s-score-card">
-          <div class="s-score-ring-wrap">
-            <svg width="68" height="68" viewBox="0 0 68 68">
-              <circle class="s-score-ring-bg" cx="34" cy="34" r="28"/>
-              <circle class="s-score-ring-fg" id="mis-ring" cx="34" cy="34" r="28"
-                stroke="#D97706" stroke-dasharray="175.9" stroke-dashoffset="175.9"/>
+        <div class="s-score-card-v2">
+          <div class="s-gauge-wrap">
+            <svg class="s-gauge-svg" width="160" height="88" viewBox="0 0 160 88">
+              <path class="s-gauge-bg" d="M 16,80 A 64,64 0 0,1 144,80" stroke-dasharray="201.1" stroke-dashoffset="0"/>
+              <path class="s-gauge-fg" id="mis-gauge" d="M 16,80 A 64,64 0 0,1 144,80"
+                stroke="#D97706" stroke-dasharray="201.1" stroke-dashoffset="201.1"/>
             </svg>
-            <div class="s-score-inner">
-              <div class="s-score-num" id="mis-pct">0%</div>
-              <div class="s-score-lbl">RISK</div>
-            </div>
+            <div class="s-gauge-pct" id="mis-pct" style="margin-top:-52px">0%</div>
+            <div class="s-gauge-label">RISK LEVEL</div>
           </div>
-          <div class="s-score-info">
-            <div class="s-score-verdict" id="mis-verdict">Ready to scan</div>
-            <div class="s-score-detail" id="mis-detail">Check for misinformation, manipulation tactics, and AI-generated text.</div>
-          </div>
+          <div class="s-score-verdict-v2" id="mis-verdict">Ready to scan</div>
+          <div class="s-score-detail-v2" id="mis-detail">Check for misinformation, manipulation tactics, and AI-generated text.</div>
         </div>
         <div class="s-toggles-box">
           <div class="s-toggle-row">
@@ -899,6 +891,19 @@ function injectUI() {
           <button class="s-back-btn" data-back="scam">${IC.chevLeft} Back</button>
           <div class="s-screen-label">${IC.lock} Scam Shield</div>
           <button class="s-close-btn" id="s-close-scam">${IC.x}</button>
+        </div>
+        <div class="s-score-card-v2">
+          <div class="s-gauge-wrap">
+            <svg class="s-gauge-svg" width="160" height="88" viewBox="0 0 160 88">
+              <path class="s-gauge-bg" d="M 16,80 A 64,64 0 0,1 144,80" stroke-dasharray="201.1" stroke-dashoffset="0"/>
+              <path class="s-gauge-fg" id="scam-gauge" d="M 16,80 A 64,64 0 0,1 144,80"
+                stroke="#7C3AED" stroke-dasharray="201.1" stroke-dashoffset="201.1"/>
+            </svg>
+            <div class="s-gauge-pct" id="scam-gauge-pct" style="margin-top:-52px">0%</div>
+            <div class="s-gauge-label">THREAT LEVEL</div>
+          </div>
+          <div class="s-score-verdict-v2" id="scam-verdict">Ready to scan</div>
+          <div class="s-score-detail-v2" id="scam-detail">Detect phishing, fraud, and malicious links on this page.</div>
         </div>
         <div class="s-url-box">
           <div class="s-url-label">Current Page</div>
@@ -1075,6 +1080,66 @@ function injectUI() {
       <div class="s-img-tip-verdict" id="img-tip-verdict">Analyzing…</div>
       <div class="s-img-tip-signals" id="img-tip-signals"></div>
     </div>
+
+    <!-- Left-side score sidebar (slides in after any scan) -->
+    <div id="s-score-sidebar">
+      <div class="s-sb-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <div class="s-sb-item" id="sb-tox" title="Toxicity">
+        <svg class="s-sb-gauge-svg" width="52" height="30" viewBox="0 0 52 30">
+          <path class="s-sb-gauge-bg" d="M 4,27 A 22,22 0 0,1 48,27" stroke-dasharray="69.1" stroke-dashoffset="0"/>
+          <path class="s-sb-gauge-fg" id="sb-tox-gauge" d="M 4,27 A 22,22 0 0,1 48,27" stroke="#DC2626" stroke-dasharray="69.1" stroke-dashoffset="69.1"/>
+        </svg>
+        <div class="s-sb-val" id="sb-tox-val">—</div>
+        <div class="s-sb-lbl">Toxic</div>
+        <div class="s-sb-dot s-sb-dot-clean" id="sb-tox-dot"></div>
+        <div class="s-sb-tooltip" id="sb-tox-tip">Toxicity: —</div>
+      </div>
+      <div class="s-sb-item" id="sb-mis" title="Misinfo">
+        <svg class="s-sb-gauge-svg" width="52" height="30" viewBox="0 0 52 30">
+          <path class="s-sb-gauge-bg" d="M 4,27 A 22,22 0 0,1 48,27" stroke-dasharray="69.1" stroke-dashoffset="0"/>
+          <path class="s-sb-gauge-fg" id="sb-mis-gauge" d="M 4,27 A 22,22 0 0,1 48,27" stroke="#D97706" stroke-dasharray="69.1" stroke-dashoffset="69.1"/>
+        </svg>
+        <div class="s-sb-val" id="sb-mis-val">—</div>
+        <div class="s-sb-lbl">Misinfo</div>
+        <div class="s-sb-dot s-sb-dot-clean" id="sb-mis-dot"></div>
+        <div class="s-sb-tooltip" id="sb-mis-tip">Misinfo: —</div>
+      </div>
+      <div class="s-sb-item" id="sb-scam" title="Scam">
+        <svg class="s-sb-gauge-svg" width="52" height="30" viewBox="0 0 52 30">
+          <path class="s-sb-gauge-bg" d="M 4,27 A 22,22 0 0,1 48,27" stroke-dasharray="69.1" stroke-dashoffset="0"/>
+          <path class="s-sb-gauge-fg" id="sb-scam-gauge" d="M 4,27 A 22,22 0 0,1 48,27" stroke="#7C3AED" stroke-dasharray="69.1" stroke-dashoffset="69.1"/>
+        </svg>
+        <div class="s-sb-val" id="sb-scam-val">—</div>
+        <div class="s-sb-lbl">Scam</div>
+        <div class="s-sb-dot s-sb-dot-clean" id="sb-scam-dot"></div>
+        <div class="s-sb-tooltip" id="sb-scam-tip">Scam: —</div>
+      </div>
+      <div class="s-sb-item" id="sb-ai" title="AI Content">
+        <svg class="s-sb-gauge-svg" width="52" height="30" viewBox="0 0 52 30">
+          <path class="s-sb-gauge-bg" d="M 4,27 A 22,22 0 0,1 48,27" stroke-dasharray="69.1" stroke-dashoffset="0"/>
+          <path class="s-sb-gauge-fg" id="sb-ai-gauge" d="M 4,27 A 22,22 0 0,1 48,27" stroke="#059669" stroke-dasharray="69.1" stroke-dashoffset="69.1"/>
+        </svg>
+        <div class="s-sb-val" id="sb-ai-val">—</div>
+        <div class="s-sb-lbl">AI Text</div>
+        <div class="s-sb-dot s-sb-dot-clean" id="sb-ai-dot"></div>
+        <div class="s-sb-tooltip" id="sb-ai-tip">AI Score: —</div>
+      </div>
+      <div class="s-sb-item" id="sb-manip" title="Manipulation">
+        <svg class="s-sb-gauge-svg" width="52" height="30" viewBox="0 0 52 30">
+          <path class="s-sb-gauge-bg" d="M 4,27 A 22,22 0 0,1 48,27" stroke-dasharray="69.1" stroke-dashoffset="0"/>
+          <path class="s-sb-gauge-fg" id="sb-manip-gauge" d="M 4,27 A 22,22 0 0,1 48,27" stroke="#EA580C" stroke-dasharray="69.1" stroke-dashoffset="69.1"/>
+        </svg>
+        <div class="s-sb-val" id="sb-manip-val">—</div>
+        <div class="s-sb-lbl">Manip.</div>
+        <div class="s-sb-dot s-sb-dot-clean" id="sb-manip-dot"></div>
+        <div class="s-sb-tooltip" id="sb-manip-tip">Manipulation: —</div>
+      </div>
+      <button class="s-sb-dismiss" id="sb-dismiss" title="Hide sidebar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
   `;
 
   document.body.appendChild(root);
@@ -1108,6 +1173,17 @@ function injectUI() {
   updateStats();
   runUrlChecks();
   loadStats();
+
+  // Score sidebar dismiss
+  document.getElementById("sb-dismiss")?.addEventListener("click", () => {
+    document.getElementById("s-score-sidebar")?.classList.remove("visible");
+  });
+  // Click sidebar items to open matching scan mode
+  [["sb-tox","toxicity"],["sb-mis","misinfo"],["sb-scam","scam"]].forEach(([id, mode]) => {
+    document.getElementById(id)?.addEventListener("click", () => {
+      openSidebar(); goMode(mode);
+    });
+  });
 }
 
 
@@ -1283,13 +1359,60 @@ function applyResultsToUI(mode, data, flags, extracted) {
 }
 
 // ── UI updaters ───────────────────────────────────────────────────────────────
-function animateRing(ringId, pct, color) {
-  const ring = document.getElementById(ringId);
-  if (!ring) return;
-  const circumference = 188.5; // 2π × r=30
-  const offset = circumference - (circumference * pct / 100);
-  ring.style.strokeDashoffset = offset;
-  ring.style.stroke = color;
+// ── Gauge animation ───────────────────────────────────────────────────────────
+// Semicircle arc length: π × r
+// For main gauges: r=64, arc = π×64 ≈ 201.1
+// For sidebar mini: r=22, arc = π×22 ≈ 69.1
+
+function animateGauge(id, pct, color) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  // Works for both <circle> (full ring) and <path> (semicircle)
+  const total = parseFloat(el.getAttribute("stroke-dasharray")) || 201.1;
+  const offset = total - (total * Math.min(pct, 100) / 100);
+  el.style.strokeDashoffset = offset;
+  if (color) el.style.stroke = color;
+}
+
+// Legacy alias — keeps older calls working
+function animateRing(ringId, pct, color) { animateGauge(ringId, pct, color); }
+
+function scoreColor(pct) {
+  return pct > 65 ? "#DC2626" : pct > 35 ? "#D97706" : "#059669";
+}
+
+function dotClass(pct) {
+  return pct > 65 ? "s-sb-dot-high" : pct > 35 ? "s-sb-dot-medium" : pct > 10 ? "s-sb-dot-low" : "s-sb-dot-clean";
+}
+
+// ── Score sidebar update ──────────────────────────────────────────────────────
+function updateScoreSidebar(data) {
+  const scores = {
+    tox:   Math.round((data.toxicity     || 0) * 100),
+    mis:   Math.round((data.misinfo      || 0) * 100),
+    scam:  Math.round((data.scam_score   || 0) * 100),
+    ai:    Math.round((data.ai_score     || 0) * 100),
+    manip: Math.round((data.manipulation || 0) * 100),
+  };
+  const labels = { tox:"Toxicity", mis:"Misinfo", scam:"Scam", ai:"AI Text", manip:"Manipulation" };
+
+  Object.entries(scores).forEach(([key, pct]) => {
+    const color = scoreColor(pct);
+    animateGauge(`sb-${key}-gauge`, pct, color);
+
+    const valEl = document.getElementById(`sb-${key}-val`);
+    if (valEl) valEl.textContent = pct + "%";
+
+    const dotEl = document.getElementById(`sb-${key}-dot`);
+    if (dotEl) dotEl.className = `s-sb-dot ${dotClass(pct)}`;
+
+    const tipEl = document.getElementById(`sb-${key}-tip`);
+    if (tipEl) tipEl.textContent = `${labels[key]}: ${pct}%`;
+  });
+
+  // Slide sidebar in
+  const sb = document.getElementById("s-score-sidebar");
+  if (sb) sb.classList.add("visible");
 }
 
 function setVerdict(verdictId, detailId, pct, labels) {
@@ -1303,75 +1426,72 @@ function setVerdict(verdictId, detailId, pct, labels) {
 }
 
 function updateToxicityUI(data) {
-  const pct   = Math.round((data.toxicity || 0) * 100);
-  const color = pct > 65 ? "#F43F5E" : pct > 35 ? "#F59E0B" : "#10B981";
-  animateRing("tox-ring", pct, color);
+  const pct = Math.round((data.toxicity || 0) * 100);
+  animateGauge("tox-gauge", pct, scoreColor(pct));
   const pctEl = document.getElementById("tox-pct");
   if (pctEl) pctEl.textContent = pct + "%";
   setVerdict("tox-verdict", "tox-detail", pct, {
-    safe:   { title: "✅ All clear!",           detail: "No toxic language detected on this page." },
-    low:    { title: "🟡 Minor signals",         detail: "A few potentially unkind phrases — nothing serious." },
-    medium: { title: "⚠️ Toxic content found",   detail: "Harmful language patterns detected. Approach with caution." },
-    high:   { title: "🚨 High toxicity!",        detail: "Strong harassment or hate speech patterns present." },
+    safe:   { title: "All clear",           detail: "No toxic language detected on this page." },
+    low:    { title: "Minor signals",        detail: "A few potentially unkind phrases — nothing serious." },
+    medium: { title: "Toxic content found", detail: "Harmful language patterns detected. Approach with caution." },
+    high:   { title: "High toxicity",        detail: "Strong harassment or hate speech patterns present." },
   });
-  const tflags = lastFlags.filter(f => f.type === "toxicity" || f.type === "toxicity");
+  const tflags = lastFlags.filter(f => f.type === "toxicity");
   renderFlags("tox-flags", "tox-flag-count", tflags);
   generateWriteup("tox-writeup-text", data, tflags, "toxicity", pct);
+  updateScoreSidebar(data);
 }
 
 function updateMisinfoUI(data) {
   const misPct   = Math.round((data.misinfo      || 0) * 100);
   const manipPct = Math.round((data.manipulation || 0) * 100);
+  const aiPct    = Math.round((data.ai_score     || 0) * 100);
   setBar("mis-bar",   "mis-bar-pct",  misPct);
   setBar("manip-bar", "manip-pct",    manipPct);
-
-  // Update mis ring based on higher of the two
-  const topPct  = Math.max(misPct, manipPct);
-  const misColor = topPct > 65 ? "#F43F5E" : topPct > 35 ? "#F59E0B" : "#10B981";
-  animateRing("mis-ring", topPct, misColor);
+  const topPct = Math.max(misPct, manipPct);
+  animateGauge("mis-gauge", topPct, scoreColor(topPct));
   const misPctEl = document.getElementById("mis-pct");
   if (misPctEl) misPctEl.textContent = topPct + "%";
   setVerdict("mis-verdict", "mis-detail", topPct, {
-    safe:   { title: "✅ Looks legit!",          detail: "No significant misinformation patterns found." },
-    low:    { title: "🟡 Some spin detected",     detail: "A few persuasion tactics — check sources independently." },
-    medium: { title: "⚠️ Misleading content",    detail: "Manipulation or unverified claims detected." },
-    high:   { title: "🚨 High misinfo risk!",     detail: "Strong indicators of false or manipulative content." },
+    safe:   { title: "Looks legitimate",    detail: "No significant misinformation patterns found." },
+    low:    { title: "Some spin detected",  detail: "A few persuasion tactics — check sources independently." },
+    medium: { title: "Misleading content", detail: "Manipulation or unverified claims detected." },
+    high:   { title: "High misinfo risk",   detail: "Strong indicators of false or manipulative content." },
   });
-
   const rel = lastFlags.filter(f => ["misinfo","manipulation","ai"].includes(f.type));
   renderFlags("mis-flags", "mis-flag-count", rel);
   generateWriteup("mis-writeup-text", data, rel, "misinfo", topPct);
-
-  // AI text score panel
-  const aiPct = Math.round((data.ai_score || 0) * 100);
   if (aiPct > 20) {
     const aiBox = document.getElementById("ai-text-result");
     if (aiBox) aiBox.style.display = "block";
-    const aiBar = document.getElementById("ai-text-bar");
-    if (aiBar) aiBar.style.width = aiPct + "%";
-    const aiPctEl = document.getElementById("ai-text-pct");
-    if (aiPctEl) aiPctEl.textContent = aiPct + "%";
+    setBar("ai-text-bar", "ai-text-pct", aiPct);
     const aiVerdict = document.getElementById("ai-text-verdict");
-    if (aiVerdict) {
-      aiVerdict.textContent = aiPct > 65
-        ? "This content shows strong signals of being AI-generated."
-        : aiPct > 35
-        ? "Some AI-writing patterns detected — may be AI-assisted."
-        : "Mostly human-written, with minor AI-style markers.";
-    }
+    if (aiVerdict) aiVerdict.textContent = aiPct > 65
+      ? "Strong signals of AI-generated text."
+      : aiPct > 35 ? "Possibly AI-assisted writing." : "Mostly human-written.";
   }
+  updateScoreSidebar(data);
 }
 
 function updateScamUI(data) {
-  const scamPct   = Math.round((data.scam_score   || 0) * 100);
-  const manipPct  = Math.round((data.manipulation || 0) * 100);
+  const scamPct  = Math.round((data.scam_score   || 0) * 100);
+  const manipPct = Math.round((data.manipulation || 0) * 100);
+  animateGauge("scam-gauge", scamPct, scoreColor(scamPct));
+  const scamGaugePct = document.getElementById("scam-gauge-pct");
+  if (scamGaugePct) scamGaugePct.textContent = scamPct + "%";
+  setVerdict("scam-verdict", "scam-detail", scamPct, {
+    safe:   { title: "No threats detected",  detail: "This page looks safe." },
+    low:    { title: "Minor signals",         detail: "Some low-level signals — stay alert." },
+    medium: { title: "Suspicious page",      detail: "Scam patterns detected. Do not share personal info." },
+    high:   { title: "High threat",           detail: "Strong phishing indicators. Leave this page." },
+  });
   setBar("scam-bar",       "scam-pct",       scamPct);
   setBar("social-eng-bar", "social-eng-pct", manipPct);
-  const scamColor = scamPct > 65 ? "#F43F5E" : scamPct > 35 ? "#F59E0B" : "#10B981";
   const scamFlags = lastFlags.filter(f => ["scam","phishing"].includes(f.type));
   renderFlags("scam-flags", "scam-flag-count", scamFlags);
   renderLinks("scam-links");
   generateWriteup("scam-writeup-text", data, scamFlags, "scam", scamPct);
+  updateScoreSidebar(data);
 }
 
 function setBar(barId, pctId, pct) {
