@@ -784,7 +784,7 @@ export default function AnalysisDashboard() {
       <footer className="h-9 border-t bg-white shrink-0 flex items-center px-6 justify-between text-[9px] text-muted-foreground font-medium">
         <div className="flex gap-4">
           <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-green-500" />API Connected</span>
-          <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-primary/60" />Gemini Active</span>
+          <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-primary/60" />AI Analysis Active</span>
         </div>
         <span>© 2026 Sentinel Intelligence · v5.0</span>
       </footer>
