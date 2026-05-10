@@ -462,7 +462,7 @@ function injectCreatorBanner(data, extracted) {
     : "";
 
   const geminiTag = data.gemini_active
-    ? `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:99px;background:#dbeafe;color:#1d4ed8;margin-left:6px">⚡ Gemini</span>`
+    ? `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:99px;background:#dbeafe;color:#1d4ed8;margin-left:6px">⚡ AI Enhanced</span>`
     : `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:99px;background:#f3f4f6;color:#6b7280;margin-left:6px">ML</span>`;
 
   const banner = document.createElement("div");
@@ -787,7 +787,7 @@ function injectUI() {
           <button class="s-clear-btn" id="tox-clear">${IC.x} Clear</button>
         </div>
         <div class="s-analysis-box">
-          <div class="s-analysis-label">${IC.zap} Gemini Analysis</div>
+          <div class="s-analysis-label">${IC.zap} AI Analysis</div>
           <div class="s-analysis-text" id="tox-writeup-text">Run a scan to see the AI analysis.</div>
         </div>
         <div class="s-flags-section">
@@ -867,7 +867,7 @@ function injectUI() {
           <div class="s-ai-signals" id="ai-text-signals"></div>
         </div>
         <div class="s-analysis-box">
-          <div class="s-analysis-label">${IC.zap} Gemini Analysis</div>
+          <div class="s-analysis-label">${IC.zap} AI Analysis</div>
           <div class="s-analysis-text" id="mis-writeup-text">Run a scan to see the AI analysis.</div>
         </div>
         <div class="s-flags-section">
@@ -932,7 +932,7 @@ function injectUI() {
           <button class="s-clear-btn" id="scam-clear">${IC.x} Clear</button>
         </div>
         <div class="s-analysis-box">
-          <div class="s-analysis-label">${IC.zap} Gemini Threat Analysis</div>
+          <div class="s-analysis-label">${IC.zap} AI Threat Analysis</div>
           <div class="s-analysis-text" id="scam-writeup-text">Run a scan to detect threats.</div>
         </div>
         <div class="s-flags-section">
@@ -1556,7 +1556,7 @@ function renderFlags(containerId, countId, flags) {
     const sevLabel  = f.severity ? f.severity.toUpperCase() : "";
     const conf      = f.score ? `<div class="s-flag-conf">Confidence: ${Math.round(f.score*100)}%</div>` : "";
     const source    = f.source === "gemini"
-      ? `<span style="font-size:8px;font-weight:800;color:#6366F1;margin-left:auto">⚡ Gemini</span>`
+      ? `<span style="font-size:8px;font-weight:800;color:#6366F1;margin-left:auto">⚡ AI</span>`
       : "";
     return `
       <div class="s-flag-card" style="animation-delay:${i * 0.04}s">
@@ -1888,7 +1888,7 @@ async function analyzeImage(img) {
   tip.style.display = "block";
   tip.style.left = Math.min(rect.left + window.scrollX, window.innerWidth - 250) + "px";
   tip.style.top  = (rect.bottom + window.scrollY + 8) + "px";
-  document.getElementById("img-tip-verdict").textContent = "Analyzing with Gemini Vision…";
+  document.getElementById("img-tip-verdict").textContent = "Scanning image…";
   document.getElementById("img-tip-bar").style.width = "15%";
   document.getElementById("img-tip-signals").innerHTML = "";
 
@@ -1997,7 +1997,7 @@ function detectImageSignals(img) {
     { score += 0.4; labels.push("AI context on page"); }
   if (["photo by","©","canon","nikon","shot on iphone","f/","iso "].some(p => ctx.includes(p)))
     { score -= 0.2; labels.push("Camera metadata nearby"); }
-  if (!labels.length) labels.push("No strong signals (Gemini unavailable)");
+  if (!labels.length) labels.push("No strong signals detected");
   return { aiScore: Math.max(0, Math.min(1, score)), labels };
 }
 
@@ -2038,7 +2038,7 @@ function onTextSelect() {
     const verdict = document.getElementById("ai-text-verdict");
     const sigEl   = document.getElementById("ai-text-signals");
     if (pctEl)   pctEl.textContent   = "…";
-    if (verdict) verdict.textContent = "Analyzing with Gemini…";
+    if (verdict) verdict.textContent = "Identifying flags…";
     if (bar)     bar.style.width     = "10%";
     if (sigEl)   sigEl.innerHTML     = "";
 
