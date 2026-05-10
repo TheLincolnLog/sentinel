@@ -629,3 +629,156 @@
   from { width: 100%; }
   to   { width: 0%; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SEMICIRCLE GAUGES
+   ══════════════════════════════════════════════════════════════════════════════ */
+.s-gauge-wrap {
+  position: relative;
+  width: 100%; padding-bottom: 0;
+  display: flex; flex-direction: column; align-items: center;
+}
+.s-gauge-svg { display: block; overflow: visible; }
+.s-gauge-bg  { fill: none; stroke: var(--s-border); stroke-width: 10; stroke-linecap: round; }
+.s-gauge-fg  {
+  fill: none; stroke-width: 10; stroke-linecap: round;
+  transition: stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1), stroke 0.4s;
+}
+.s-gauge-pct {
+  font-size: 22px; font-weight: 700; color: var(--s-text); line-height: 1;
+  margin-top: -8px; text-align: center;
+}
+.s-gauge-label {
+  font-size: 10px; font-weight: 600; color: var(--s-muted);
+  letter-spacing: 0.07em; text-transform: uppercase; text-align: center;
+  margin-top: 2px;
+}
+
+/* Score card using semicircle */
+.s-score-card-v2 {
+  margin: 14px;
+  border: 1px solid var(--s-border); border-radius: 10px;
+  padding: 16px 14px 12px;
+  background: var(--s-surface);
+  display: flex; flex-direction: column; align-items: center;
+  gap: 8px;
+}
+.s-score-verdict-v2 { font-size: 14px; font-weight: 600; color: var(--s-text); text-align: center; }
+.s-score-detail-v2  { font-size: 11px; color: var(--s-muted); text-align: center; line-height: 1.5; }
+
+/* Mini gauge row for the multi-score strip */
+.s-mini-gauge-row {
+  display: flex; gap: 0;
+  border-top: 1px solid var(--s-border);
+  flex-shrink: 0;
+}
+.s-mini-gauge-cell {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  padding: 10px 4px 8px;
+  border-right: 1px solid var(--s-border);
+  background: var(--s-surface);
+}
+.s-mini-gauge-cell:last-child { border-right: none; }
+.s-mini-gauge-svg { display: block; overflow: visible; }
+.s-mini-gauge-bg  { fill: none; stroke: var(--s-border); stroke-width: 7; stroke-linecap: round; }
+.s-mini-gauge-fg  { fill: none; stroke-width: 7; stroke-linecap: round; transition: stroke-dashoffset 0.8s cubic-bezier(0.4,0,0.2,1), stroke 0.4s; }
+.s-mini-gauge-val { font-size: 11px; font-weight: 700; color: var(--s-text); margin-top: -2px; line-height: 1; }
+.s-mini-gauge-lbl { font-size: 8px; font-weight: 600; color: var(--s-muted); letter-spacing: 0.05em; text-transform: uppercase; margin-top: 1px; text-align: center; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SCORE SIDEBAR (left edge, slides in after scan)
+   ══════════════════════════════════════════════════════════════════════════════ */
+#s-score-sidebar {
+  position: fixed;
+  top: 50%; left: 0;
+  transform: translateY(-50%) translateX(-100%);
+  z-index: 2147483644;
+  width: 72px;
+  background: var(--s-bg);
+  border: 1px solid var(--s-border);
+  border-left: none;
+  border-radius: 0 12px 12px 0;
+  box-shadow: 4px 0 20px rgba(0,0,0,0.08);
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0; overflow: hidden;
+  transition: transform 0.35s cubic-bezier(0.16,1,0.3,1);
+}
+#s-score-sidebar.visible {
+  transform: translateY(-50%) translateX(0);
+}
+.s-sb-header {
+  width: 100%; padding: 8px 0 6px;
+  background: var(--s-accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.s-sb-header svg { width: 16px; height: 16px; color: #fff; }
+.s-sb-item {
+  width: 100%; display: flex; flex-direction: column; align-items: center;
+  padding: 8px 4px 6px;
+  border-top: 1px solid var(--s-border);
+  cursor: pointer; transition: background 0.12s;
+  position: relative;
+}
+.s-sb-item:hover { background: var(--s-surface); }
+.s-sb-item:hover .s-sb-tooltip { opacity: 1; pointer-events: all; }
+.s-sb-gauge-svg { display: block; overflow: visible; }
+.s-sb-gauge-bg  { fill: none; stroke: var(--s-border); stroke-width: 6; stroke-linecap: round; }
+.s-sb-gauge-fg  { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 0.8s cubic-bezier(0.4,0,0.2,1), stroke 0.4s; }
+.s-sb-val  { font-size: 10px; font-weight: 700; color: var(--s-text); margin-top: -1px; line-height: 1; }
+.s-sb-lbl  { font-size: 7px; font-weight: 600; color: var(--s-muted); letter-spacing: 0.04em; text-transform: uppercase; margin-top: 1px; text-align: center; line-height: 1.2; }
+.s-sb-dot  {
+  width: 6px; height: 6px; border-radius: 50%;
+  position: absolute; top: 6px; right: 6px;
+}
+.s-sb-dot-high   { background: var(--s-tox); }
+.s-sb-dot-medium { background: var(--s-mis); }
+.s-sb-dot-low    { background: var(--s-safe); }
+.s-sb-dot-clean  { background: var(--s-border); }
+
+/* Sidebar tooltip */
+.s-sb-tooltip {
+  position: absolute; left: calc(100% + 8px); top: 50%;
+  transform: translateY(-50%);
+  background: var(--s-text); color: #fff;
+  font-size: 10px; font-weight: 500;
+  padding: 5px 10px; border-radius: 6px;
+  white-space: nowrap; pointer-events: none; opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.s-sb-tooltip::before {
+  content: ""; position: absolute;
+  right: 100%; top: 50%; transform: translateY(-50%);
+  border: 5px solid transparent; border-right-color: var(--s-text);
+}
+#s-score-sidebar .s-sb-dismiss {
+  width: 100%; padding: 6px 0;
+  background: none; border: none; border-top: 1px solid var(--s-border);
+  color: var(--s-muted-2); cursor: pointer; font-size: 10px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.12s;
+}
+#s-score-sidebar .s-sb-dismiss:hover { background: var(--s-tox-soft); color: var(--s-tox); }
+#s-score-sidebar .s-sb-dismiss svg { width: 12px; height: 12px; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TOAST — right side, stacks downward from top-right
+   ══════════════════════════════════════════════════════════════════════════════ */
+#s-toast-container {
+  position: fixed;
+  top: 20px; right: 20px; bottom: auto; left: auto;
+  z-index: 2147483647;
+  display: flex; flex-direction: column; gap: 10px;
+  align-items: flex-end; pointer-events: none;
+  max-width: 340px;
+}
+/* Override the old bottom positioning */
+@keyframes s-toast-in {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes s-toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(24px); }
+}
