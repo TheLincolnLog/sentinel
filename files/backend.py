@@ -1,13 +1,14 @@
 # backend.py — Sentinel v8
 # Architecture:
 #   1. ML model + keyword lists → instant flags for page highlighting (fast first-pass)
-#   2. Gemini 1.5 Flash        → primary text scores + reasoning (authoritative judge)
-#   3. Gemini Vision           → AI image detection (real model, not heuristics)
-#   4. Gemini text-AI detector → dedicated AI text detection with strict prompt
+#   2. Groq (llama-3.3-70b)    → primary text scores + reasoning (authoritative judge)
+#   3. Groq vision via GPT-4o  → AI image detection
+#   4. Groq text-AI detector   → dedicated AI text detection
 #
 # Run:     uvicorn backend:app --reload
 # Install: pip install fastapi uvicorn scikit-learn joblib httpx
-# Set env: export GEMINI_API_KEY="your-key-here"
+# Set env: export GROQ_API_KEY="your-key-here"
+# Get key: console.groq.com (free, no credit card)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,32 +25,36 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-# ── Gemini config ─────────────────────────────────────────────────────────────
-GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_BASE     = "https://generativelanguage.googleapis.com/v1/models"
-GEMINI_URL      = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
-GEMINI_VIS_URL  = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
+# ── AI config — Groq (free tier: 14,400 req/day, 30 RPM, no card needed) ─────
+GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "")
+GROQ_URL      = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL    = "llama-3.3-70b-versatile"   # best free model on Groq
+GROQ_RPM_LIMIT = 25   # safely under Groq's 30 RPM free limit
 
-# ── Rate limiter — respects free tier (15 RPM) ────────────────────────────────
+# Keep GEMINI_API_KEY as fallback if user still has it set
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_BASE    = "https://generativelanguage.googleapis.com/v1/models"
+GEMINI_URL     = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
+GEMINI_VIS_URL = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
+
+# Primary key — use Groq if available, fall back to Gemini
+USE_GROQ = bool(GROQ_API_KEY)
+
+# ── Rate limiter ──────────────────────────────────────────────────────────────
 import asyncio, time, hashlib as _hs
 from collections import deque
 
-# Set to 10 to stay safely under the 15 RPM free limit
-# Change to 50 if you have billing enabled
-GEMINI_RPM_LIMIT = 10
-
-_request_times: deque = deque()   # timestamps of recent Gemini calls
+_request_times: deque = deque()
 _rate_lock = asyncio.Lock()
 
-async def _gemini_rate_wait():
-    """Block until we're safely under the RPM limit."""
+async def _rate_wait():
+    """Block until safely under RPM limit for whichever provider is active."""
+    limit = GROQ_RPM_LIMIT if USE_GROQ else 10
     async with _rate_lock:
         now = time.monotonic()
-        # Drop timestamps older than 60 seconds
         while _request_times and now - _request_times[0] > 60:
             _request_times.popleft()
-        if len(_request_times) >= GEMINI_RPM_LIMIT:
-            # Wait until the oldest request is > 60s ago
+        if len(_request_times) >= limit:
             wait_for = 61 - (now - _request_times[0])
             if wait_for > 0:
                 await asyncio.sleep(wait_for)
@@ -360,28 +365,38 @@ RULES:
 - overall_severity must reflect the single highest concern
 """
 
-async def call_gemini(text: str, url: str = "", title: str = "") -> dict | None:
-    """Call Gemini 2.0 Flash with rate limiting and response caching."""
-    if not GEMINI_API_KEY:
-        print("⚠  GEMINI_API_KEY not set — skipping Gemini scan")
+async def _call_groq(prompt: str, max_tokens: int = 1024) -> str | None:
+    """Call Groq API (OpenAI-compatible). Returns raw text or None."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                GROQ_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                },
+                json={
+                    "model": GROQ_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                    "max_tokens": max_tokens,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except httpx.HTTPStatusError as e:
+        print(f"⚠  Groq HTTP {e.response.status_code}: {e.response.text[:300]}")
+        return None
+    except Exception as e:
+        print(f"⚠  Groq call failed: {e}")
         return None
 
-    # Check cache first — avoids re-calling for same page content
-    ck = _cache_key("analyze-text", text + url)
-    cached = _cache_get(ck)
-    if cached:
-        print("✓  Gemini cache hit")
-        return cached
 
-    prompt = GEMINI_SYSTEM_PROMPT.format(
-        url=url or "unknown",
-        title=title or "unknown",
-        text=text[:7000],
-    )
-
-    # Wait if near the rate limit
-    await _gemini_rate_wait()
-
+async def _call_gemini_text(prompt: str, max_tokens: int = 1024) -> str | None:
+    """Call Gemini REST API. Returns raw text or None."""
+    if not GEMINI_API_KEY:
+        return None
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
@@ -389,28 +404,62 @@ async def call_gemini(text: str, url: str = "", title: str = "") -> dict | None:
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "temperature": 0.1,
-                        "maxOutputTokens": 1024,
-                    },
+                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": max_tokens},
                 },
             )
         resp.raise_for_status()
-        raw      = resp.json()
-        text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
-        text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
-        result   = json.loads(text_out)
-        _cache_set(ck, result)
+        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        print(f"⚠  Gemini text call failed: {e}")
+        return None
+
+
+async def call_ai(prompt: str, cache_key_str: str = "", max_tokens: int = 1024) -> dict | None:
+    """
+    Primary AI call — tries Groq first, falls back to Gemini.
+    Includes caching and rate limiting.
+    """
+    # Cache check
+    if cache_key_str:
+        ck = _cache_key("ai", cache_key_str)
+        cached = _cache_get(ck)
+        if cached:
+            print("✓  AI cache hit")
+            return cached
+
+    await _rate_wait()
+
+    raw_text = None
+    if USE_GROQ:
+        raw_text = await _call_groq(prompt, max_tokens)
+        if raw_text is None:
+            print("⚠  Groq failed — trying Gemini fallback")
+            raw_text = await _call_gemini_text(prompt, max_tokens)
+    else:
+        raw_text = await _call_gemini_text(prompt, max_tokens)
+
+    if not raw_text:
+        return None
+
+    try:
+        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text.strip())
+        result = json.loads(clean)
+        if cache_key_str:
+            _cache_set(ck, result)
         return result
     except json.JSONDecodeError as e:
-        print(f"⚠  Gemini JSON parse error: {e}")
+        print(f"⚠  AI JSON parse error: {e}\nRaw: {raw_text[:200]}")
         return None
-    except httpx.HTTPStatusError as e:
-        print(f"⚠  Gemini HTTP {e.response.status_code}: {e.response.text[:300]}")
-        return None
-    except Exception as e:
-        print(f"⚠  Gemini call failed: {e}")
-        return None
+
+
+# Alias for backward compat with any code still calling call_gemini
+async def call_gemini(text: str, url: str = "", title: str = "") -> dict | None:
+    prompt = GEMINI_SYSTEM_PROMPT.format(
+        url=url or "unknown",
+        title=title or "unknown",
+        text=text[:7000],
+    )
+    return await call_ai(prompt, cache_key_str=text[:500] + url)
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 class AnalyzeRequest(BaseModel):
@@ -655,35 +704,16 @@ async def analyze_creator(req: CreatorRequest):
     )
 
     gemini_result = None
-    if GEMINI_API_KEY:
-        # Check cache
+    if GROQ_API_KEY or GEMINI_API_KEY:
         ck = _cache_key("creator", (req.creator_name or "") + (req.caption or "") + req.platform)
         gemini_result = _cache_get(ck)
         if gemini_result:
-            print("✓  Creator Gemini cache hit")
+            print("✓  Creator AI cache hit")
         else:
-          try:
-            await _gemini_rate_wait()
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-                    headers={"Content-Type": "application/json"},
-                    json={
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {
-                            "temperature": 0.1,
-                            "maxOutputTokens": 1024,
-                        },
-                    },
-                )
-            resp.raise_for_status()
-            raw      = resp.json()
-            text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
-            text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
-            gemini_result = json.loads(text_out)
-            _cache_set(ck, gemini_result)
-          except Exception as e:
-            print(f"⚠  Gemini creator scan error: {e}")
+            gemini_result = await call_ai(
+                prompt,
+                cache_key_str=(req.creator_name or "") + (req.caption or "") + req.platform,
+            )
 
     if gemini_result:
         return CreatorResponse(
@@ -780,7 +810,7 @@ async def analyze_image(req: ImageAnalyzeRequest):
         parts.append({"text": f"\nAdditional context from the surrounding page: {req.context[:300]}"})
 
     # Rate limit
-    await _gemini_rate_wait()
+    await _rate_wait()
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -880,26 +910,9 @@ async def analyze_text_ai(req: TextAiRequest):
     if req.context:
         prompt += f"\n\nContext about where this text appeared: {req.context}"
 
-    await _gemini_rate_wait()
+    result = await call_ai(prompt, cache_key_str=text[:300], max_tokens=512)
 
-    try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            resp = await client.post(
-                f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "temperature": 0.05,
-                        "maxOutputTokens": 512,
-                    },
-                },
-            )
-        resp.raise_for_status()
-        raw      = resp.json()
-        text_out = raw["candidates"][0]["content"]["parts"][0]["text"]
-        text_out = re.sub(r"^```(?:json)?\s*|\s*```$", "", text_out.strip())
-        result   = json.loads(text_out)
+    if result:
         return TextAiResponse(
             ai_probability = float(result.get("ai_probability", 0.5)),
             verdict        = result.get("verdict", "uncertain"),
@@ -908,22 +921,23 @@ async def analyze_text_ai(req: TextAiRequest):
             explanation    = result.get("explanation", ""),
             gemini_active  = True,
         )
-    except Exception as e:
-        print(f"⚠  Gemini text-AI error: {e}")
+    else:
         score, _ = compute_ai_signals(text)
         verdict = "likely_ai" if score > 0.6 else "uncertain" if score > 0.3 else "likely_human"
         return TextAiResponse(ai_probability=score, verdict=verdict, confidence="low",
-            signals=["Gemini call failed — heuristic fallback"],
-            explanation=f"Gemini error: {str(e)[:60]}. Using keyword heuristics.",
+            signals=["AI unavailable — heuristic fallback"],
+            explanation="Using keyword heuristics — set GROQ_API_KEY for accurate results.",
             gemini_active=False)
 
 
 @app.get("/")
 def health():
+    ai_provider = "groq" if USE_GROQ else ("gemini" if GEMINI_API_KEY else "none")
     return {
         "status":       "Sentinel v8 running",
-        "architecture": "Gemini primary judge + ML/keyword first-pass",
-        "gemini":       "active" if GEMINI_API_KEY else "⚠ GEMINI_API_KEY not set",
+        "ai_provider":  ai_provider,
+        "groq":         "active" if GROQ_API_KEY else "not set",
+        "gemini":       "active" if GEMINI_API_KEY else "not set (image fallback only)",
         "ml_model":     "loaded" if ml_classifier else "keyword fallback",
         "val_acc":      model_info.get("val_acc", "n/a"),
         "whitelist":    f"{len(whitelist)} phrases protected",
