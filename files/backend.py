@@ -26,9 +26,9 @@ app.add_middleware(
 
 # ── Gemini config ─────────────────────────────────────────────────────────────
 GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_BASE     = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_URL      = f"{GEMINI_BASE}/gemini-1.5-flash-latest:generateContent"
-GEMINI_VIS_URL  = f"{GEMINI_BASE}/gemini-1.5-flash-latest:generateContent"
+GEMINI_BASE     = "https://generativelanguage.googleapis.com/v1/models"
+GEMINI_URL      = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
+GEMINI_VIS_URL  = f"{GEMINI_BASE}/gemini-2.0-flash:generateContent"
 
 # ── Load ML model ─────────────────────────────────────────────────────────────
 MODEL_PATH = "model.pkl"
