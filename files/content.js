@@ -23,7 +23,7 @@ let textAiOn        = false;
 // ── DEV: Force AI-detected mode ───────────────────────────────────────────────
 // Set to true to bypass the backend and always return AI-detected results.
 // Flip back to false before shipping.
-const DEV_FORCE_AI_DETECTED = true;
+const DEV_FORCE_AI_DETECTED = false;
 
 // Scan result cache: url+mode → { data, timestamp }
 const scanCache = new Map();
